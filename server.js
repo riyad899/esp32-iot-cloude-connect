@@ -2,7 +2,6 @@ require("dotenv").config();
 
 const express = require("express");
 const { Pool } = require("pg");
-const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -14,13 +13,20 @@ const pool = new Pool({
 
 function authenticate(req, res, next) {
   const expected = process.env.DEVICE_KEY || "";
-  const received = req.header("x-device-key") || "";
-  const a = Buffer.from(expected);
-  const b = Buffer.from(received);
+  const received = req.get("x-device-key") || "";
 
-  if (!expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return res.status(401).json({ error: "Unauthorized" });
+  // Debug without exposing either secret
+  console.log("DEVICE_KEY loaded:", Boolean(expected));
+  console.log("Expected key length:", expected.length);
+  console.log("Received key length:", received.length);
+  console.log("Keys match:", expected === received);
+
+  if (!expected || expected !== received) {
+    return res.status(401).json({
+      error: "Unauthorized",
+    });
   }
+
   next();
 }
 
