@@ -1,5 +1,4 @@
 const { neon } = require("@neondatabase/serverless");
-require("dotenv").config();
 
 module.exports = async function handler(req, res) {
   if (req.method !== "GET") {
@@ -21,12 +20,13 @@ module.exports = async function handler(req, res) {
     const rows = await sql`
       SELECT
         device_id,
-        last_seen,
+        created_at AS last_seen,
         EXTRACT(
-          EPOCH FROM (NOW() - last_seen)
+          EPOCH FROM (NOW() - created_at)
         ) AS seconds_since_seen
-      FROM device_status
+      FROM device_readings
       WHERE device_id = 'esp32-001'
+      ORDER BY created_at DESC
       LIMIT 1
     `;
 
@@ -35,7 +35,8 @@ module.exports = async function handler(req, res) {
         success: true,
         deviceId: "esp32-001",
         status: "offline",
-        message: "Device has never sent a heartbeat",
+        active: false,
+        message: "No data received from device yet",
         lastSeen: null,
       });
     }
