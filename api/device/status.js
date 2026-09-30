@@ -43,7 +43,7 @@ module.exports = async function handler(req, res) {
 
     const device = rows[0];
     const seconds = Number(device.seconds_since_seen);
-    const isActive = seconds <= 90;
+    const isActive = seconds <= 60;
 
     return res.status(200).json({
       success: true,
