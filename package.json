@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "npm install",
     "start": "node server.js",
     "dev": "node server.js",
     "vercel-build": "echo 'Vercel build complete'",
