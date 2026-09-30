@@ -74,7 +74,11 @@ app.get("/api/device/data/latest", async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, "0.0.0.0", () => {
-  console.log(`API listening on port ${port}`);
-});
+if (require.main === module) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`API listening on port ${port}`);
+  });
+}
+
+module.exports = app;
