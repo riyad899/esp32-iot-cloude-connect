@@ -2,19 +2,18 @@ const { neon } = require("@neondatabase/serverless");
 require("dotenv").config();
 
 module.exports = async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-device-key, x-admin-key, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({
       error: "Method not allowed",
-    });
-  }
-
-  const expectedKey = process.env.DEVICE_KEY;
-  const receivedKey = req.headers["x-device-key"];
-
-  if (!expectedKey || receivedKey !== expectedKey) {
-    return res.status(401).json({
-      error: "Unauthorized",
     });
   }
 
@@ -25,13 +24,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const { deviceId } = req.body || {};
-
-    if (deviceId !== "esp32-001") {
-      return res.status(400).json({
-        error: "Invalid deviceId",
-      });
-    }
+    const { deviceId = "esp32-001" } = req.body || {};
 
     const sql = neon(process.env.DATABASE_URL);
 

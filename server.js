@@ -2,7 +2,6 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const crypto = require("crypto");
 const { Pool } = require("pg");
 
 const app = express();
@@ -14,62 +13,14 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: true },
 });
 
-// Middleware: Device Authentication (x-device-key)
-function authenticateDevice(req, res, next) {
-  const expected = process.env.DEVICE_KEY || "";
-  const received = req.get("x-device-key") || "";
-
-  if (!expected || !received) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const bufExpected = Buffer.from(expected);
-  const bufReceived = Buffer.from(received);
-
-  if (bufExpected.length !== bufReceived.length || !crypto.timingSafeEqual(bufExpected, bufReceived)) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  next();
-}
-
-// Middleware: Admin Authentication (x-admin-key or Bearer token)
-function authenticateAdmin(req, res, next) {
-  const expected = process.env.ADMIN_API_KEY || "";
-  if (!expected) {
-    return res.status(500).json({ error: "Admin authentication is not configured on server" });
-  }
-
-  const authHeader = req.get("authorization");
-  const bearerKey = authHeader && authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
-  const received = req.get("x-admin-key") || bearerKey || "";
-
-  if (!received) {
-    return res.status(401).json({ error: "Unauthorized: Missing admin API key" });
-  }
-
-  const bufExpected = Buffer.from(expected);
-  const bufReceived = Buffer.from(received);
-
-  if (bufExpected.length !== bufReceived.length || !crypto.timingSafeEqual(bufExpected, bufReceived)) {
-    return res.status(401).json({ error: "Unauthorized: Invalid admin API key" });
-  }
-
-  next();
-}
-
 // --- Health Check ---
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
 // --- Device Telemetry Ingestion ---
-app.post("/api/device/data", authenticateDevice, async (req, res) => {
-  const { deviceId, temperature, humidity, latitude, longitude } = req.body || {};
-
-  if (deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid deviceId" });
-  }
+app.post("/api/device/data", async (req, res) => {
+  const { deviceId = "esp32-001", temperature, humidity, latitude, longitude } = req.body || {};
 
   const validNumber = (value) => value === undefined || value === null || (typeof value === "number" && Number.isFinite(value));
   if (![temperature, humidity, latitude, longitude].every(validNumber)) {
@@ -97,13 +48,14 @@ app.post("/api/device/data", authenticateDevice, async (req, res) => {
 
 // --- Latest Telemetry Query ---
 app.get(["/api/device/data", "/api/device/data/latest"], async (req, res) => {
+  const deviceId = req.query?.deviceId || "esp32-001";
   try {
     const result = await pool.query(
       `SELECT * FROM device_readings
        WHERE device_id = $1
        ORDER BY created_at DESC
        LIMIT 1`,
-      ["esp32-001"]
+      [deviceId]
     );
     res.json({ success: true, data: result.rows[0] ?? null });
   } catch (error) {
@@ -113,12 +65,8 @@ app.get(["/api/device/data", "/api/device/data/latest"], async (req, res) => {
 });
 
 // --- Device Heartbeat ---
-app.post("/api/device/heartbeat", authenticateDevice, async (req, res) => {
-  const { deviceId } = req.body || {};
-
-  if (deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid deviceId" });
-  }
+app.post("/api/device/heartbeat", async (req, res) => {
+  const { deviceId = "esp32-001" } = req.body || {};
 
   try {
     const result = await pool.query(
@@ -138,6 +86,7 @@ app.post("/api/device/heartbeat", authenticateDevice, async (req, res) => {
 
 // --- Device Online/Offline Status ---
 app.get("/api/device/status", async (req, res) => {
+  const deviceId = req.query?.deviceId || "esp32-001";
   try {
     const result = await pool.query(
       `SELECT
@@ -145,15 +94,16 @@ app.get("/api/device/status", async (req, res) => {
          created_at AS last_seen,
          EXTRACT(EPOCH FROM (NOW() - created_at)) AS seconds_since_seen
        FROM device_readings
-       WHERE device_id = 'esp32-001'
+       WHERE device_id = $1
        ORDER BY created_at DESC
-       LIMIT 1`
+       LIMIT 1`,
+      [deviceId]
     );
 
     if (result.rows.length === 0) {
       return res.status(200).json({
         success: true,
-        deviceId: "esp32-001",
+        deviceId: deviceId,
         status: "offline",
         active: false,
         message: "No data received from device yet",
@@ -179,13 +129,9 @@ app.get("/api/device/status", async (req, res) => {
   }
 });
 
-// --- Device 2-Channel Relay Command Polling (x-device-key authenticated) ---
-app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
-  const deviceId = req.query?.deviceId;
-
-  if (!deviceId || deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid or missing deviceId. Expected 'esp32-001'" });
-  }
+// --- Open Relay Command Polling (No auth required) ---
+app.get("/api/device/relay/command", async (req, res) => {
+  const deviceId = req.query?.deviceId || "esp32-001";
 
   try {
     const result = await pool.query(
@@ -220,15 +166,11 @@ app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
   }
 });
 
-// --- Admin 2-Channel Relay Control (x-admin-key authenticated, supports partial updates) ---
-app.post("/api/device/relay", authenticateAdmin, async (req, res) => {
-  const { deviceId, relay1, relay2, relay } = req.body || {};
+// --- Open Relay Control (No auth required, supports partial updates) ---
+app.post("/api/device/relay", async (req, res) => {
+  const { deviceId: inputDeviceId, relay1, relay2, relay } = req.body || {};
+  const deviceId = inputDeviceId || "esp32-001";
 
-  if (deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
-  }
-
-  // Support relay1, relay2, or legacy relay (mapped to relay1)
   const targetRelay1 = relay1 !== undefined ? relay1 : relay;
   const targetRelay2 = relay2;
 
@@ -279,13 +221,9 @@ app.post("/api/device/relay", authenticateAdmin, async (req, res) => {
   }
 });
 
-// --- Admin 2-Channel Relay Query (x-admin-key authenticated) ---
-app.get("/api/device/relay", authenticateAdmin, async (req, res) => {
+// --- Open Relay Query ---
+app.get("/api/device/relay", async (req, res) => {
   const deviceId = req.query?.deviceId || "esp32-001";
-
-  if (deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
-  }
 
   try {
     const result = await pool.query(

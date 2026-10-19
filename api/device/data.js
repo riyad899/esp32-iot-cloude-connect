@@ -2,6 +2,14 @@ const { neon } = require("@neondatabase/serverless");
 require("dotenv").config();
 
 module.exports = async function handler(req, res) {
+	res.setHeader("Access-Control-Allow-Origin", "*");
+	res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+	res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-device-key, x-admin-key, Authorization");
+
+	if (req.method === "OPTIONS") {
+		return res.status(200).end();
+	}
+
 	// GET latest sensor reading
 	if (req.method === "GET") {
 		try {
@@ -42,18 +50,9 @@ module.exports = async function handler(req, res) {
 	}
 
 	if (req.method !== "POST") {
-		res.setHeader("Allow", "GET, POST");
+		res.setHeader("Allow", "GET, POST, OPTIONS");
 		return res.status(405).json({
 			error: "Method not allowed",
-		});
-	}
-
-	const expected = process.env.DEVICE_KEY || "";
-	const received = req.headers["x-device-key"] || "";
-
-	if (!expected || expected !== received) {
-		return res.status(401).json({
-			error: "Unauthorized",
 		});
 	}
 
@@ -63,11 +62,7 @@ module.exports = async function handler(req, res) {
 		});
 	}
 
-	const { deviceId, temperature, humidity, latitude, longitude } = req.body ?? {};
-
-	if (deviceId !== "esp32-001") {
-		return res.status(400).json({ error: "Invalid deviceId" });
-	}
+	const { deviceId = "esp32-001", temperature, humidity, latitude, longitude } = req.body ?? {};
 
 	const validNumber = (value) =>
 		value === undefined ||
