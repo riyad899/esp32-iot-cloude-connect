@@ -8,7 +8,9 @@
     "start": "node server.js",
     "dev": "node server.js",
     "vercel-build": "echo 'Vercel build complete'",
-    "test": "node --check server.js"
+    "migrate": "node scripts/migrate.js",
+    "test": "node --check server.js && node tests/test_relay.js",
+    "test:relay": "node tests/test_relay.js"
   },
   "keywords": [],
   "author": "",
