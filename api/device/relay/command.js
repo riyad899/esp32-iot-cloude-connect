@@ -46,8 +46,8 @@ module.exports = async function handler(req, res) {
   try {
     const sql = neon(process.env.DATABASE_URL);
     const rows = await sql`
-      SELECT device_id, relay_state, updated_at
-      FROM device_relay_commands
+      SELECT device_id, relay1_state, relay2_state, updated_at
+      FROM device_relay_states
       WHERE device_id = ${deviceId}
       LIMIT 1
     `;
@@ -56,7 +56,8 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({
         success: true,
         deviceId: deviceId,
-        relay: "OFF",
+        relay1: "OFF",
+        relay2: "OFF",
         updatedAt: new Date().toISOString()
       });
     }
@@ -65,7 +66,8 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       success: true,
       deviceId: command.device_id,
-      relay: command.relay_state ? "ON" : "OFF",
+      relay1: command.relay1_state ? "ON" : "OFF",
+      relay2: command.relay2_state ? "ON" : "OFF",
       updatedAt: new Date(command.updated_at).toISOString()
     });
   } catch (error) {

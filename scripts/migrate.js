@@ -9,35 +9,34 @@ async function runMigration() {
     process.exit(1);
   }
 
-  const sqlPath = path.join(__dirname, "../db/migrations/001_create_device_relay_commands.sql");
-  const sqlContent = fs.readFileSync(sqlPath, "utf8");
-
   console.log("Connecting to Neon Database...");
   const sql = neon(process.env.DATABASE_URL);
 
-  try {
-    console.log("Applying migration: 001_create_device_relay_commands.sql");
-    await sql.transaction([
-      sql`
-        CREATE TABLE IF NOT EXISTS device_relay_commands (
-          device_id VARCHAR(50) PRIMARY KEY,
-          relay_state BOOLEAN NOT NULL DEFAULT FALSE,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `,
-      sql`
-        INSERT INTO device_relay_commands (device_id, relay_state, updated_at)
-        VALUES ('esp32-001', FALSE, NOW())
-        ON CONFLICT (device_id) DO NOTHING
-      `
-    ]);
+  const migrationsDir = path.join(__dirname, "../db/migrations");
+  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith(".sql")).sort();
 
-    const rows = await sql`SELECT * FROM device_relay_commands WHERE device_id = 'esp32-001'`;
-    console.log("Migration successful! Current device_relay_commands status:", rows);
-  } catch (error) {
-    console.error("Migration failed:", error);
-    process.exit(1);
+  for (const file of files) {
+    console.log(`Applying migration: ${file}`);
+    const filePath = path.join(migrationsDir, file);
+    const sqlContent = fs.readFileSync(filePath, "utf8");
+    
+    // Split into individual queries separated by semicolon
+    const statements = sqlContent
+      .split(";")
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    for (const stmt of statements) {
+      await sql.query(stmt);
+    }
+    console.log(`  ✓ Completed: ${file}`);
   }
+
+  const rows = await sql`SELECT * FROM device_relay_states WHERE device_id = 'esp32-001'`;
+  console.log("\nMigration successful! Current device_relay_states row:", rows);
 }
 
-runMigration();
+runMigration().catch((err) => {
+  console.error("Migration failed:", err);
+  process.exit(1);
+});

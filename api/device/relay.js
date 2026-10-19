@@ -29,6 +29,7 @@ function verifyAdminAuth(req) {
 }
 
 module.exports = async function handler(req, res) {
+  // Support GET to view relay status for admin / dashboard
   if (req.method === "GET") {
     const auth = verifyAdminAuth(req);
     if (!auth.authorized) {
@@ -47,8 +48,8 @@ module.exports = async function handler(req, res) {
     try {
       const sql = neon(process.env.DATABASE_URL);
       const rows = await sql`
-        SELECT device_id, relay_state, updated_at
-        FROM device_relay_commands
+        SELECT device_id, relay1_state, relay2_state, updated_at
+        FROM device_relay_states
         WHERE device_id = ${deviceId}
         LIMIT 1
       `;
@@ -57,7 +58,8 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
           success: true,
           deviceId: deviceId,
-          relay: "OFF",
+          relay1: "OFF",
+          relay2: "OFF",
           updatedAt: new Date().toISOString()
         });
       }
@@ -66,7 +68,8 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({
         success: true,
         deviceId: command.device_id,
-        relay: command.relay_state ? "ON" : "OFF",
+        relay1: command.relay1_state ? "ON" : "OFF",
+        relay2: command.relay2_state ? "ON" : "OFF",
         updatedAt: new Date(command.updated_at).toISOString()
       });
     } catch (error) {
@@ -89,35 +92,55 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: "Database is not configured" });
   }
 
-  const { deviceId, relay } = req.body || {};
+  const { deviceId, relay1, relay2, relay } = req.body || {};
 
   if (deviceId !== "esp32-001") {
     return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
   }
 
-  if (relay !== "ON" && relay !== "OFF") {
-    return res.status(400).json({ error: "Invalid relay value. Must be 'ON' or 'OFF'" });
+  // Support relay1, relay2, or legacy relay (mapped to relay1 if relay1 not specified)
+  const targetRelay1 = relay1 !== undefined ? relay1 : relay;
+  const targetRelay2 = relay2;
+
+  if (targetRelay1 === undefined && targetRelay2 === undefined) {
+    return res.status(400).json({ error: "Missing relay state. Provide relay1, relay2, or both." });
   }
 
-  const isRelayOn = relay === "ON";
+  if (targetRelay1 !== undefined && targetRelay1 !== "ON" && targetRelay1 !== "OFF") {
+    return res.status(400).json({ error: "Invalid relay1 value. Must be 'ON' or 'OFF'" });
+  }
+
+  if (targetRelay2 !== undefined && targetRelay2 !== "ON" && targetRelay2 !== "OFF") {
+    return res.status(400).json({ error: "Invalid relay2 value. Must be 'ON' or 'OFF'" });
+  }
+
+  const r1Bool = targetRelay1 !== undefined ? (targetRelay1 === "ON") : null;
+  const r2Bool = targetRelay2 !== undefined ? (targetRelay2 === "ON") : null;
 
   try {
     const sql = neon(process.env.DATABASE_URL);
     const rows = await sql`
-      INSERT INTO device_relay_commands (device_id, relay_state, updated_at)
-      VALUES (${deviceId}, ${isRelayOn}, NOW())
+      INSERT INTO device_relay_states (device_id, relay1_state, relay2_state, updated_at)
+      VALUES (
+        ${deviceId},
+        COALESCE(${r1Bool}, FALSE),
+        COALESCE(${r2Bool}, FALSE),
+        NOW()
+      )
       ON CONFLICT (device_id)
       DO UPDATE SET
-        relay_state = EXCLUDED.relay_state,
+        relay1_state = COALESCE(${r1Bool}, device_relay_states.relay1_state),
+        relay2_state = COALESCE(${r2Bool}, device_relay_states.relay2_state),
         updated_at = NOW()
-      RETURNING device_id, relay_state, updated_at
+      RETURNING device_id, relay1_state, relay2_state, updated_at
     `;
 
     const updated = rows[0];
     return res.status(200).json({
       success: true,
       deviceId: updated.device_id,
-      relay: updated.relay_state ? "ON" : "OFF",
+      relay1: updated.relay1_state ? "ON" : "OFF",
+      relay2: updated.relay2_state ? "ON" : "OFF",
       updatedAt: new Date(updated.updated_at).toISOString()
     });
   } catch (error) {

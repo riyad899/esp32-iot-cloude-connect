@@ -179,7 +179,7 @@ app.get("/api/device/status", async (req, res) => {
   }
 });
 
-// --- Device Relay Command Polling (x-device-key authenticated) ---
+// --- Device 2-Channel Relay Command Polling (x-device-key authenticated) ---
 app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
   const deviceId = req.query?.deviceId;
 
@@ -189,8 +189,8 @@ app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT device_id, relay_state, updated_at
-       FROM device_relay_commands
+      `SELECT device_id, relay1_state, relay2_state, updated_at
+       FROM device_relay_states
        WHERE device_id = $1
        LIMIT 1`,
       [deviceId]
@@ -200,7 +200,8 @@ app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
       return res.status(200).json({
         success: true,
         deviceId: deviceId,
-        relay: "OFF",
+        relay1: "OFF",
+        relay2: "OFF",
         updatedAt: new Date().toISOString(),
       });
     }
@@ -209,7 +210,8 @@ app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
     return res.status(200).json({
       success: true,
       deviceId: row.device_id,
-      relay: row.relay_state ? "ON" : "OFF",
+      relay1: row.relay1_state ? "ON" : "OFF",
+      relay2: row.relay2_state ? "ON" : "OFF",
       updatedAt: new Date(row.updated_at).toISOString(),
     });
   } catch (error) {
@@ -218,37 +220,57 @@ app.get("/api/device/relay/command", authenticateDevice, async (req, res) => {
   }
 });
 
-// --- Admin Relay Control (x-admin-key authenticated) ---
+// --- Admin 2-Channel Relay Control (x-admin-key authenticated, supports partial updates) ---
 app.post("/api/device/relay", authenticateAdmin, async (req, res) => {
-  const { deviceId, relay } = req.body || {};
+  const { deviceId, relay1, relay2, relay } = req.body || {};
 
   if (deviceId !== "esp32-001") {
     return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
   }
 
-  if (relay !== "ON" && relay !== "OFF") {
-    return res.status(400).json({ error: "Invalid relay value. Must be 'ON' or 'OFF'" });
+  // Support relay1, relay2, or legacy relay (mapped to relay1)
+  const targetRelay1 = relay1 !== undefined ? relay1 : relay;
+  const targetRelay2 = relay2;
+
+  if (targetRelay1 === undefined && targetRelay2 === undefined) {
+    return res.status(400).json({ error: "Missing relay state. Provide relay1, relay2, or both." });
   }
 
-  const isRelayOn = relay === "ON";
+  if (targetRelay1 !== undefined && targetRelay1 !== "ON" && targetRelay1 !== "OFF") {
+    return res.status(400).json({ error: "Invalid relay1 value. Must be 'ON' or 'OFF'" });
+  }
+
+  if (targetRelay2 !== undefined && targetRelay2 !== "ON" && targetRelay2 !== "OFF") {
+    return res.status(400).json({ error: "Invalid relay2 value. Must be 'ON' or 'OFF'" });
+  }
+
+  const r1Bool = targetRelay1 !== undefined ? (targetRelay1 === "ON") : null;
+  const r2Bool = targetRelay2 !== undefined ? (targetRelay2 === "ON") : null;
 
   try {
     const result = await pool.query(
-      `INSERT INTO device_relay_commands (device_id, relay_state, updated_at)
-       VALUES ($1, $2, NOW())
+      `INSERT INTO device_relay_states (device_id, relay1_state, relay2_state, updated_at)
+       VALUES (
+         $1,
+         COALESCE($2, FALSE),
+         COALESCE($3, FALSE),
+         NOW()
+       )
        ON CONFLICT (device_id)
        DO UPDATE SET
-         relay_state = EXCLUDED.relay_state,
+         relay1_state = COALESCE($2, device_relay_states.relay1_state),
+         relay2_state = COALESCE($3, device_relay_states.relay2_state),
          updated_at = NOW()
-       RETURNING device_id, relay_state, updated_at`,
-      [deviceId, isRelayOn]
+       RETURNING device_id, relay1_state, relay2_state, updated_at`,
+      [deviceId, r1Bool, r2Bool]
     );
 
     const row = result.rows[0];
     return res.status(200).json({
       success: true,
       deviceId: row.device_id,
-      relay: row.relay_state ? "ON" : "OFF",
+      relay1: row.relay1_state ? "ON" : "OFF",
+      relay2: row.relay2_state ? "ON" : "OFF",
       updatedAt: new Date(row.updated_at).toISOString(),
     });
   } catch (error) {
@@ -257,7 +279,7 @@ app.post("/api/device/relay", authenticateAdmin, async (req, res) => {
   }
 });
 
-// --- Admin Relay Query (x-admin-key authenticated) ---
+// --- Admin 2-Channel Relay Query (x-admin-key authenticated) ---
 app.get("/api/device/relay", authenticateAdmin, async (req, res) => {
   const deviceId = req.query?.deviceId || "esp32-001";
 
@@ -267,8 +289,8 @@ app.get("/api/device/relay", authenticateAdmin, async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT device_id, relay_state, updated_at
-       FROM device_relay_commands
+      `SELECT device_id, relay1_state, relay2_state, updated_at
+       FROM device_relay_states
        WHERE device_id = $1
        LIMIT 1`,
       [deviceId]
@@ -278,7 +300,8 @@ app.get("/api/device/relay", authenticateAdmin, async (req, res) => {
       return res.status(200).json({
         success: true,
         deviceId: deviceId,
-        relay: "OFF",
+        relay1: "OFF",
+        relay2: "OFF",
         updatedAt: new Date().toISOString(),
       });
     }
@@ -287,7 +310,8 @@ app.get("/api/device/relay", authenticateAdmin, async (req, res) => {
     return res.status(200).json({
       success: true,
       deviceId: row.device_id,
-      relay: row.relay_state ? "ON" : "OFF",
+      relay1: row.relay1_state ? "ON" : "OFF",
+      relay2: row.relay2_state ? "ON" : "OFF",
       updatedAt: new Date(row.updated_at).toISOString(),
     });
   } catch (error) {
