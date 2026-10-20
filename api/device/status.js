@@ -1,6 +1,14 @@
 const { neon } = require("@neondatabase/serverless");
 
 module.exports = async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-device-key, x-admin-key, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({
@@ -14,6 +22,8 @@ module.exports = async function handler(req, res) {
     });
   }
 
+  const deviceId = req.query?.deviceId || "esp32-001";
+
   try {
     const sql = neon(process.env.DATABASE_URL);
 
@@ -25,7 +35,7 @@ module.exports = async function handler(req, res) {
           EPOCH FROM (NOW() - created_at)
         ) AS seconds_since_seen
       FROM device_readings
-      WHERE device_id = 'esp32-001'
+      WHERE device_id = ${deviceId}
       ORDER BY created_at DESC
       LIMIT 1
     `;
@@ -33,7 +43,7 @@ module.exports = async function handler(req, res) {
     if (rows.length === 0) {
       return res.status(200).json({
         success: true,
-        deviceId: "esp32-001",
+        deviceId: deviceId,
         status: "offline",
         active: false,
         message: "No data received from device yet",

@@ -91,36 +91,10 @@ app.post("/api/device/data", async (req, res) => {
       ? satellites
       : null;
 
-    let finalLat = null;
-    let finalLng = null;
-    let finalAlt = null;
-    let finalGpsValid = false;
-
-    if (hasLiveValidGps) {
-      finalLat = latitude;
-      finalLng = longitude;
-      finalAlt = altitude ?? null;
-      finalGpsValid = true;
-    } else {
-      const prevGps = await pool.query(
-        `SELECT latitude, longitude, altitude
-         FROM device_readings
-         WHERE device_id = $1
-           AND gps_valid = TRUE
-           AND latitude IS NOT NULL
-           AND longitude IS NOT NULL
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [deviceId]
-      );
-
-      if (prevGps.rows.length > 0) {
-        finalLat = prevGps.rows[0].latitude;
-        finalLng = prevGps.rows[0].longitude;
-        finalAlt = prevGps.rows[0].altitude;
-        finalGpsValid = false;
-      }
-    }
+    const finalLat = hasLiveValidGps ? latitude : null;
+    const finalLng = hasLiveValidGps ? longitude : null;
+    const finalAlt = hasLiveValidGps ? (altitude ?? null) : null;
+    const finalGpsValid = hasLiveValidGps;
 
     const result = await pool.query(
       `INSERT INTO device_readings (
@@ -140,8 +114,28 @@ app.post("/api/device/data", async (req, res) => {
         longitude,
         altitude,
         satellites,
-        gps_valid
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        gps_valid,
+        created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+      ON CONFLICT (device_id)
+      DO UPDATE SET
+        temperature = EXCLUDED.temperature,
+        humidity = EXCLUDED.humidity,
+        temperature1 = EXCLUDED.temperature1,
+        humidity1 = EXCLUDED.humidity1,
+        temperature2 = EXCLUDED.temperature2,
+        humidity2 = EXCLUDED.humidity2,
+        soil_moisture_raw = EXCLUDED.soil_moisture_raw,
+        rain_sensor_raw = EXCLUDED.rain_sensor_raw,
+        soil1 = EXCLUDED.soil1,
+        soil2 = EXCLUDED.soil2,
+        rain = EXCLUDED.rain,
+        latitude = COALESCE(EXCLUDED.latitude, device_readings.latitude),
+        longitude = COALESCE(EXCLUDED.longitude, device_readings.longitude),
+        altitude = COALESCE(EXCLUDED.altitude, device_readings.altitude),
+        satellites = EXCLUDED.satellites,
+        gps_valid = EXCLUDED.gps_valid,
+        created_at = NOW()
       RETURNING *`,
       [
         deviceId,
@@ -295,7 +289,8 @@ app.get("/api/device/status", async (req, res) => {
        FROM device_readings
        WHERE device_id = $1
        ORDER BY created_at DESC
-       LIMIT 1`
+       LIMIT 1`,
+      [deviceId]
     );
 
     if (result.rows.length === 0) {

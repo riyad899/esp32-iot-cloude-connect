@@ -42,7 +42,6 @@ module.exports = async function handler(req, res) {
           created_at
         FROM device_readings
         WHERE device_id = ${deviceId}
-        ORDER BY created_at DESC
         LIMIT 1
       `;
 
@@ -91,8 +90,6 @@ module.exports = async function handler(req, res) {
     res.setHeader("Allow", "GET, POST, OPTIONS");
     return res.status(405).json({ error: "Method not allowed" });
   }
-
-  // Open - No device key required in headers
 
   if (!process.env.DATABASE_URL) {
     return res.status(500).json({ error: "Database is not configured" });
@@ -167,42 +164,17 @@ module.exports = async function handler(req, res) {
       latitude >= -90 && latitude <= 90 &&
       longitude >= -180 && longitude <= 180;
 
-    // Satellites must strictly reflect the current reading — show null if not provided, never a static fallback
+    // Satellites strictly reflects current reading (null if omitted)
     const finalSats = (typeof satellites === "number" && Number.isInteger(satellites) && satellites >= 0)
       ? satellites
       : null;
 
-    let finalLat = null;
-    let finalLng = null;
-    let finalAlt = null;
-    let finalGpsValid = false;
+    const finalLat = hasLiveValidGps ? latitude : null;
+    const finalLng = hasLiveValidGps ? longitude : null;
+    const finalAlt = hasLiveValidGps ? (altitude ?? null) : null;
+    const finalGpsValid = hasLiveValidGps;
 
-    if (hasLiveValidGps) {
-      finalLat = latitude;
-      finalLng = longitude;
-      finalAlt = altitude ?? null;
-      finalGpsValid = true;
-    } else {
-      // Fallback: preserve previous valid GPS coordinates (latitude/longitude)
-      const prevGps = await sql`
-        SELECT latitude, longitude, altitude
-        FROM device_readings
-        WHERE device_id = ${deviceId}
-          AND gps_valid = TRUE
-          AND latitude IS NOT NULL
-          AND longitude IS NOT NULL
-        ORDER BY created_at DESC
-        LIMIT 1
-      `;
-
-      if (prevGps.length > 0) {
-        finalLat = prevGps[0].latitude;
-        finalLng = prevGps[0].longitude;
-        finalAlt = prevGps[0].altitude;
-        finalGpsValid = false;
-      }
-    }
-
+    // Latest-only PostgreSQL UPSERT strategy
     const rows = await sql`
       INSERT INTO device_readings (
         device_id,
@@ -221,7 +193,8 @@ module.exports = async function handler(req, res) {
         longitude,
         altitude,
         satellites,
-        gps_valid
+        gps_valid,
+        created_at
       ) VALUES (
         ${deviceId},
         ${finalTemp},
@@ -239,8 +212,28 @@ module.exports = async function handler(req, res) {
         ${finalLng},
         ${finalAlt},
         ${finalSats},
-        ${finalGpsValid}
+        ${finalGpsValid},
+        NOW()
       )
+      ON CONFLICT (device_id)
+      DO UPDATE SET
+        temperature = EXCLUDED.temperature,
+        humidity = EXCLUDED.humidity,
+        temperature1 = EXCLUDED.temperature1,
+        humidity1 = EXCLUDED.humidity1,
+        temperature2 = EXCLUDED.temperature2,
+        humidity2 = EXCLUDED.humidity2,
+        soil_moisture_raw = EXCLUDED.soil_moisture_raw,
+        rain_sensor_raw = EXCLUDED.rain_sensor_raw,
+        soil1 = EXCLUDED.soil1,
+        soil2 = EXCLUDED.soil2,
+        rain = EXCLUDED.rain,
+        latitude = COALESCE(EXCLUDED.latitude, device_readings.latitude),
+        longitude = COALESCE(EXCLUDED.longitude, device_readings.longitude),
+        altitude = COALESCE(EXCLUDED.altitude, device_readings.altitude),
+        satellites = EXCLUDED.satellites,
+        gps_valid = EXCLUDED.gps_valid,
+        created_at = NOW()
       RETURNING *
     `;
 

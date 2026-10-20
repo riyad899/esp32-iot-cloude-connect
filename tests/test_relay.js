@@ -3,6 +3,8 @@ const http = require("http");
 const app = require("../server");
 const dataHandler = require("../api/device/data");
 const latestHandler = require("../api/device/data/latest");
+const statusHandler = require("../api/device/status");
+const commandHandler = require("../api/device/relay/command");
 
 const PORT = 3099;
 let server;
@@ -52,7 +54,7 @@ function invokeHandler(handler, { method = "GET", headers = {}, query = {}, body
 }
 
 async function runTests() {
-  console.log("=== Testing Dynamic Satellite Handling (Null when not received) ===");
+  console.log("=== Testing Public APIs & Latest-Only PostgreSQL UPSERT ===");
   server = app.listen(PORT);
 
   let passed = 0;
@@ -69,60 +71,69 @@ async function runTests() {
   }
 
   try {
-    // 1. Send payload WITH satellites (e.g. 9)
-    const withSatsPayload = {
+    // 1. Post initial reading (no auth headers)
+    const payload1 = {
       deviceId: "esp32-001",
       temperature: 28.5,
-      humidity: 65,
-      soilMoistureRaw: 1840,
+      humidity: 72,
+      soilMoistureRaw: 1850,
       rainSensorRaw: 3200,
       gpsValid: true,
-      latitude: 23.8103,
-      longitude: 90.4125,
-      altitude: 12.4,
+      latitude: 24.7471,
+      longitude: 90.4203,
+      altitude: 18.5,
+      satellites: 8
+    };
+
+    const res1 = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/data",
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    }, payload1);
+
+    const rowId1 = res1.body?.data?.id;
+    assert(
+      res1.status === 201 &&
+      res1.body?.success === true &&
+      res1.body?.data?.soilMoistureRaw === 1850 &&
+      res1.body?.data?.latitude === 24.7471,
+      "POST /api/device/data accepts payload with NO custom headers"
+    );
+
+    // 2. Post second reading to verify latest-only UPSERT (updates the same database row)
+    const payload2 = {
+      deviceId: "esp32-001",
+      temperature: 29.0,
+      humidity: 70,
+      soilMoistureRaw: 1900,
+      rainSensorRaw: 3100,
+      gpsValid: true,
+      latitude: 24.7475,
+      longitude: 90.4210,
+      altitude: 19.0,
       satellites: 9
     };
 
-    const resWithSats = await request({
+    const res2 = await request({
       hostname: "localhost",
       port: PORT,
       path: "/api/device/data",
       method: "POST",
       headers: { "Content-Type": "application/json" }
-    }, withSatsPayload);
+    }, payload2);
 
+    const rowId2 = res2.body?.data?.id;
     assert(
-      resWithSats.status === 201 && resWithSats.body?.data?.satellites === 9,
-      "Payload with satellite count returns 9"
+      res2.status === 201 &&
+      res2.body?.data?.temperature === 29.0 &&
+      res2.body?.data?.soilMoistureRaw === 1900 &&
+      String(rowId1) === String(rowId2),
+      "Repeated sensor POST updates the SAME database row (UPSERT verified)"
     );
 
-    // 2. Send payload WITHOUT satellites (omitted/no fix)
-    const withoutSatsPayload = {
-      deviceId: "esp32-001",
-      temperature: 28.5,
-      humidity: 65,
-      soilMoistureRaw: 1840,
-      rainSensorRaw: 3200,
-      gpsValid: false,
-      latitude: null,
-      longitude: null
-      // satellites omitted
-    };
-
-    const resNoSats = await request({
-      hostname: "localhost",
-      port: PORT,
-      path: "/api/device/data",
-      method: "POST",
-      headers: { "Content-Type": "application/json" }
-    }, withoutSatsPayload);
-
-    assert(
-      resNoSats.status === 201 && resNoSats.body?.data?.satellites === null,
-      "Payload without satellites returns NULL (no static value copied)"
-    );
-
-    // 3. GET latest returns satellites as null
+    // 3. GET latest reading without custom headers
     const latestRes = await request({
       hostname: "localhost",
       port: PORT,
@@ -131,20 +142,69 @@ async function runTests() {
     });
 
     assert(
-      latestRes.status === 200 && latestRes.body?.data?.satellites === null,
-      "GET /api/device/data/latest returns satellites: null when not received"
+      latestRes.status === 200 &&
+      latestRes.body?.success === true &&
+      latestRes.body?.data?.temperature === 29.0 &&
+      latestRes.body?.data?.soilMoistureRaw === 1900 &&
+      latestRes.body?.data?.latitude === 24.7475,
+      "GET /api/device/data/latest returns latest updated state with no headers"
     );
 
-    // 4. Serverless handler test
-    const srvlessRes = await invokeHandler(dataHandler, {
-      method: "POST",
-      body: withoutSatsPayload
+    // 4. GET device status without custom headers
+    const statusRes = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/status",
+      method: "GET"
     });
 
     assert(
-      srvlessRes.status === 201 && srvlessRes.body?.data?.satellites === null,
-      "Serverless handler returns satellites: null when omitted"
+      statusRes.status === 200 &&
+      statusRes.body?.success === true &&
+      statusRes.body?.deviceId === "esp32-001",
+      "GET /api/device/status works with no headers"
     );
+
+    // 5. GET relay command without custom headers
+    const relayCmdRes = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/relay/command?deviceId=esp32-001",
+      method: "GET"
+    });
+
+    assert(
+      relayCmdRes.status === 200 &&
+      relayCmdRes.body?.success === true &&
+      relayCmdRes.body?.deviceId === "esp32-001" &&
+      typeof relayCmdRes.body?.relay1 === "string",
+      "GET /api/device/relay/command works with no headers"
+    );
+
+    // 6. Direct invocation of Vercel serverless handlers
+    const srvData = await invokeHandler(dataHandler, {
+      method: "POST",
+      body: payload1
+    });
+    assert(srvData.status === 201 && srvData.body?.success === true, "api/device/data.js serverless handler works");
+
+    const srvLatest = await invokeHandler(latestHandler, {
+      method: "GET",
+      query: { deviceId: "esp32-001" }
+    });
+    assert(srvLatest.status === 200 && srvLatest.body?.success === true, "api/device/data/latest.js serverless handler works");
+
+    const srvStatus = await invokeHandler(statusHandler, {
+      method: "GET",
+      query: { deviceId: "esp32-001" }
+    });
+    assert(srvStatus.status === 200 && srvStatus.body?.success === true, "api/device/status.js serverless handler works");
+
+    const srvCmd = await invokeHandler(commandHandler, {
+      method: "GET",
+      query: { deviceId: "esp32-001" }
+    });
+    assert(srvCmd.status === 200 && srvCmd.body?.success === true, "api/device/relay/command.js serverless handler works");
 
     console.log(`\n=== Results: ${passed} Passed, ${failed} Failed ===\n`);
   } finally {
