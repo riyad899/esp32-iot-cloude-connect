@@ -86,21 +86,24 @@ app.post("/api/device/data", async (req, res) => {
       latitude >= -90 && latitude <= 90 &&
       longitude >= -180 && longitude <= 180;
 
+    // Satellites must strictly reflect the current reading — show null if not provided, never a static fallback
+    const finalSats = (typeof satellites === "number" && Number.isInteger(satellites) && satellites >= 0)
+      ? satellites
+      : null;
+
     let finalLat = null;
     let finalLng = null;
     let finalAlt = null;
-    let finalSats = null;
     let finalGpsValid = false;
 
     if (hasLiveValidGps) {
       finalLat = latitude;
       finalLng = longitude;
       finalAlt = altitude ?? null;
-      finalSats = satellites ?? null;
       finalGpsValid = true;
     } else {
       const prevGps = await pool.query(
-        `SELECT latitude, longitude, altitude, satellites
+        `SELECT latitude, longitude, altitude
          FROM device_readings
          WHERE device_id = $1
            AND gps_valid = TRUE
@@ -115,7 +118,6 @@ app.post("/api/device/data", async (req, res) => {
         finalLat = prevGps.rows[0].latitude;
         finalLng = prevGps.rows[0].longitude;
         finalAlt = prevGps.rows[0].altitude;
-        finalSats = prevGps.rows[0].satellites;
         finalGpsValid = false;
       }
     }

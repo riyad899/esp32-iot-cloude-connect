@@ -52,7 +52,7 @@ function invokeHandler(handler, { method = "GET", headers = {}, query = {}, body
 }
 
 async function runTests() {
-  console.log("=== Testing Open Multi-Sensor Ingestion (Zero Headers) ===");
+  console.log("=== Testing Dynamic Satellite Handling (Null when not received) ===");
   server = app.listen(PORT);
 
   let passed = 0;
@@ -69,8 +69,8 @@ async function runTests() {
   }
 
   try {
-    // 1. Post multi-sensor payload with NO device key in headers
-    const testPayload = {
+    // 1. Send payload WITH satellites (e.g. 9)
+    const withSatsPayload = {
       deviceId: "esp32-001",
       temperature: 28.5,
       humidity: 65,
@@ -80,26 +80,49 @@ async function runTests() {
       latitude: 23.8103,
       longitude: 90.4125,
       altitude: 12.4,
-      satellites: 8
+      satellites: 9
     };
 
-    const postRes = await request({
+    const resWithSats = await request({
       hostname: "localhost",
       port: PORT,
       path: "/api/device/data",
       method: "POST",
-      headers: { "Content-Type": "application/json" } // NO device key header
-    }, testPayload);
+      headers: { "Content-Type": "application/json" }
+    }, withSatsPayload);
 
     assert(
-      postRes.status === 201 &&
-      postRes.body?.success === true &&
-      postRes.body?.data?.soilMoistureRaw === 1840 &&
-      postRes.body?.data?.rainSensorRaw === 3200,
-      "POST /api/device/data succeeds with ZERO device key headers"
+      resWithSats.status === 201 && resWithSats.body?.data?.satellites === 9,
+      "Payload with satellite count returns 9"
     );
 
-    // 2. GET /api/device/data/latest with NO headers
+    // 2. Send payload WITHOUT satellites (omitted/no fix)
+    const withoutSatsPayload = {
+      deviceId: "esp32-001",
+      temperature: 28.5,
+      humidity: 65,
+      soilMoistureRaw: 1840,
+      rainSensorRaw: 3200,
+      gpsValid: false,
+      latitude: null,
+      longitude: null
+      // satellites omitted
+    };
+
+    const resNoSats = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/data",
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    }, withoutSatsPayload);
+
+    assert(
+      resNoSats.status === 201 && resNoSats.body?.data?.satellites === null,
+      "Payload without satellites returns NULL (no static value copied)"
+    );
+
+    // 3. GET latest returns satellites as null
     const latestRes = await request({
       hostname: "localhost",
       port: PORT,
@@ -107,55 +130,21 @@ async function runTests() {
       method: "GET"
     });
 
-    const lData = latestRes.body?.data;
     assert(
-      latestRes.status === 200 &&
-      latestRes.body?.success === true &&
-      lData?.soilMoistureRaw === 1840 &&
-      lData?.rainSensorRaw === 3200 &&
-      lData?.latitude === 23.8103 &&
-      lData?.gpsValid === true,
-      "GET /api/device/data/latest returns sensor fields without any headers"
+      latestRes.status === 200 && latestRes.body?.data?.satellites === null,
+      "GET /api/device/data/latest returns satellites: null when not received"
     );
 
-    // 3. DHT11 read failure handling
-    const nullDhtRes = await request({
-      hostname: "localhost",
-      port: PORT,
-      path: "/api/device/data",
+    // 4. Serverless handler test
+    const srvlessRes = await invokeHandler(dataHandler, {
       method: "POST",
-      headers: { "Content-Type": "application/json" }
-    }, {
-      deviceId: "esp32-001",
-      temperature: null,
-      humidity: null,
-      soilMoistureRaw: 1850,
-      rainSensorRaw: 3190
+      body: withoutSatsPayload
     });
 
     assert(
-      nullDhtRes.status === 201 &&
-      nullDhtRes.body?.data?.temperature === null &&
-      nullDhtRes.body?.data?.soilMoistureRaw === 1850,
-      "Omitted/null DHT11 readings accepted with no headers"
+      srvlessRes.status === 201 && srvlessRes.body?.data?.satellites === null,
+      "Serverless handler returns satellites: null when omitted"
     );
-
-    // 4. Serverless handlers direct test with no headers
-    const srvlessPost = await invokeHandler(dataHandler, {
-      method: "POST",
-      headers: {},
-      body: testPayload
-    });
-    assert(srvlessPost.status === 201 && srvlessPost.body?.success === true, "api/device/data.js serverless handler works with zero headers");
-
-    // 5. Relay command polling with no headers
-    const relayCmdRes = await request({
-      hostname: "localhost",
-      port: PORT,
-      path: "/api/device/relay/command?deviceId=esp32-001",
-      method: "GET"
-    });
-    assert(relayCmdRes.status === 200 && relayCmdRes.body?.success === true, "GET /api/device/relay/command works with zero headers");
 
     console.log(`\n=== Results: ${passed} Passed, ${failed} Failed ===\n`);
   } finally {

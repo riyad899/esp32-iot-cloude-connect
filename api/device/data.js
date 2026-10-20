@@ -167,22 +167,25 @@ module.exports = async function handler(req, res) {
       latitude >= -90 && latitude <= 90 &&
       longitude >= -180 && longitude <= 180;
 
+    // Satellites must strictly reflect the current reading — show null if not provided, never a static fallback
+    const finalSats = (typeof satellites === "number" && Number.isInteger(satellites) && satellites >= 0)
+      ? satellites
+      : null;
+
     let finalLat = null;
     let finalLng = null;
     let finalAlt = null;
-    let finalSats = null;
     let finalGpsValid = false;
 
     if (hasLiveValidGps) {
       finalLat = latitude;
       finalLng = longitude;
       finalAlt = altitude ?? null;
-      finalSats = satellites ?? null;
       finalGpsValid = true;
     } else {
-      // Fallback: preserve previous valid GPS fix
+      // Fallback: preserve previous valid GPS coordinates (latitude/longitude)
       const prevGps = await sql`
-        SELECT latitude, longitude, altitude, satellites
+        SELECT latitude, longitude, altitude
         FROM device_readings
         WHERE device_id = ${deviceId}
           AND gps_valid = TRUE
@@ -196,13 +199,6 @@ module.exports = async function handler(req, res) {
         finalLat = prevGps[0].latitude;
         finalLng = prevGps[0].longitude;
         finalAlt = prevGps[0].altitude;
-        finalSats = prevGps[0].satellites;
-        finalGpsValid = false;
-      } else {
-        finalLat = null;
-        finalLng = null;
-        finalAlt = null;
-        finalSats = null;
         finalGpsValid = false;
       }
     }
