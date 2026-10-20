@@ -1,8 +1,8 @@
 {
   "info": {
     "_postman_id": "a5e8f49a-7c21-4f11-9a45-66778899aabb",
-    "name": "ESP32 IoT Cloud Connect API (Open - No Auth Required)",
-    "description": "Open Postman collection for ESP32 IoT Server (No auth headers required). You can test immediately by clicking Send.",
+    "name": "ESP32 IoT Cloud Connect API (Open - Zero Headers Needed)",
+    "description": "Completely open Postman collection for ESP32 IoT Server (Multi-Sensor Telemetry, soilMoistureRaw, rainSensorRaw, GPS, and 2-Channel Relay Control). No device key or auth headers needed.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -19,130 +19,190 @@
   ],
   "item": [
     {
-      "name": "1. GET Poll Relay Commands (Open)",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/api/device/relay/command?deviceId={{deviceId}}",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "device", "relay", "command"],
-          "query": [
-            {
-              "key": "deviceId",
-              "value": "{{deviceId}}"
+      "name": "1. Multi-Sensor Telemetry",
+      "item": [
+        {
+          "name": "POST Multi-Sensor Telemetry (soilMoistureRaw, rainSensorRaw, GPS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"temperature\": 28.5,\n  \"humidity\": 65,\n  \"soilMoistureRaw\": 1840,\n  \"rainSensorRaw\": 3200,\n  \"gpsValid\": true,\n  \"latitude\": 23.8103,\n  \"longitude\": 90.4125,\n  \"altitude\": 12.4,\n  \"satellites\": 8\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/data",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "data"]
             }
-          ]
-        }
-      }
-    },
-    {
-      "name": "2. POST Set Both Relays ON (Open)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"relay1\": \"ON\",\n  \"relay2\": \"ON\"\n}"
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/device/relay",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "device", "relay"]
-        }
-      }
-    },
-    {
-      "name": "3. POST Set Relay 1 ON Only",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+        {
+          "name": "POST Telemetry with Null/Omitted DHT11 (Read Failure Safe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"temperature\": null,\n  \"humidity\": null,\n  \"soilMoistureRaw\": 1850,\n  \"rainSensorRaw\": 3190,\n  \"gpsValid\": true,\n  \"latitude\": 23.8103,\n  \"longitude\": 90.4125,\n  \"altitude\": 12.4,\n  \"satellites\": 8\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/data",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "data"]
+            }
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"relay1\": \"ON\"\n}"
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/device/relay",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "device", "relay"]
-        }
-      }
-    },
-    {
-      "name": "4. POST Set Relay 2 ON Only",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+        {
+          "name": "GET Latest Sensor Reading",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/data/latest?deviceId={{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "data", "latest"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "{{deviceId}}"
+                }
+              ]
+            }
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"relay2\": \"ON\"\n}"
-        },
-        "url": {
-          "raw": "{{baseUrl}}/api/device/relay",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "device", "relay"]
         }
-      }
+      ]
     },
     {
-      "name": "5. POST Set Both Relays OFF",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
+      "name": "2. Relay Control (2-Channel)",
+      "item": [
+        {
+          "name": "GET Poll Relay Commands",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/relay/command?deviceId={{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "relay", "command"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "{{deviceId}}"
+                }
+              ]
+            }
           }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"relay1\": \"OFF\",\n  \"relay2\": \"OFF\"\n}"
         },
-        "url": {
-          "raw": "{{baseUrl}}/api/device/relay",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "device", "relay"]
+        {
+          "name": "POST Set Both Relays ON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"relay1\": \"ON\",\n  \"relay2\": \"ON\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/relay",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "relay"]
+            }
+          }
+        },
+        {
+          "name": "POST Set Both Relays OFF",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"relay1\": \"OFF\",\n  \"relay2\": \"OFF\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/relay",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "relay"]
+            }
+          }
         }
-      }
+      ]
     },
     {
-      "name": "6. GET Latest Sensor Reading",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/api/device/data/latest",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "device", "data", "latest"]
+      "name": "3. Heartbeat & Status",
+      "item": [
+        {
+          "name": "POST Device Heartbeat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/heartbeat",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "heartbeat"]
+            }
+          }
+        },
+        {
+          "name": "GET Device Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/status?deviceId={{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "status"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "{{deviceId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            }
+          }
         }
-      }
-    },
-    {
-      "name": "7. GET Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/api/health",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "health"]
-        }
-      }
+      ]
     }
   ]
 }

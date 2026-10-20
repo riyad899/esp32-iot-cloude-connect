@@ -18,28 +18,174 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// --- Device Telemetry Ingestion ---
+// --- Multi-Sensor Device Telemetry Ingestion (Open - No headers required) ---
 app.post("/api/device/data", async (req, res) => {
-  const { deviceId = "esp32-001", temperature, humidity, latitude, longitude } = req.body || {};
+  const body = req.body || {};
+  const {
+    deviceId: inputDeviceId,
+    temperature,
+    humidity,
+    temperature1,
+    humidity1,
+    temperature2,
+    humidity2,
+    soilMoistureRaw,
+    soil1,
+    soil2,
+    rainSensorRaw,
+    rain,
+    gpsValid,
+    latitude,
+    longitude,
+    altitude,
+    satellites,
+  } = body;
 
-  const validNumber = (value) => value === undefined || value === null || (typeof value === "number" && Number.isFinite(value));
-  if (![temperature, humidity, latitude, longitude].every(validNumber)) {
-    return res.status(400).json({ error: "Invalid numeric data" });
+  const deviceId = inputDeviceId || "esp32-001";
+  if (deviceId !== "esp32-001") {
+    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
   }
 
-  if ((latitude != null && (latitude < -90 || latitude > 90)) || (longitude != null && (longitude < -180 || longitude > 180))) {
-    return res.status(400).json({ error: "Invalid coordinates" });
+  const isValidFloat = (val) => val === undefined || val === null || (typeof val === "number" && Number.isFinite(val));
+  const isValidInteger = (val) => val === undefined || val === null || (typeof val === "number" && Number.isInteger(val));
+  const isValidAdc = (val) => val === undefined || val === null || (typeof val === "number" && Number.isInteger(val) && val >= 0 && val <= 4095);
+
+  if (![temperature, humidity, temperature1, humidity1, temperature2, humidity2, altitude].every(isValidFloat)) {
+    return res.status(400).json({ error: "Invalid numeric temperature/humidity/altitude data" });
   }
+
+  const finalSoilMoisture = soilMoistureRaw !== undefined ? soilMoistureRaw : soil1;
+  const finalRain = rainSensorRaw !== undefined ? rainSensorRaw : rain;
+
+  if (!isValidAdc(finalSoilMoisture) || !isValidAdc(soil2) || !isValidAdc(finalRain)) {
+    return res.status(400).json({ error: "Invalid raw ADC reading for soil/rain. Expected integer between 0 and 4095" });
+  }
+
+  if (!isValidInteger(satellites) || (satellites != null && satellites < 0)) {
+    return res.status(400).json({ error: "Invalid satellite count. Must be a non-negative integer" });
+  }
+
+  if (latitude != null && (typeof latitude !== "number" || !Number.isFinite(latitude) || latitude < -90 || latitude > 90)) {
+    return res.status(400).json({ error: "Invalid latitude. Must be between -90 and 90" });
+  }
+  if (longitude != null && (typeof longitude !== "number" || !Number.isFinite(longitude) || longitude < -180 || longitude > 180)) {
+    return res.status(400).json({ error: "Invalid longitude. Must be between -180 and 180" });
+  }
+
+  const finalTemp = isValidFloat(temperature) ? (temperature ?? null) : null;
+  const finalHum = isValidFloat(humidity) ? (humidity ?? null) : null;
+  const finalTemp1 = isValidFloat(temperature1) ? (temperature1 ?? finalTemp) : finalTemp;
+  const finalHum1 = isValidFloat(humidity1) ? (humidity1 ?? finalHum) : finalHum;
+  const finalTemp2 = isValidFloat(temperature2) ? (temperature2 ?? null) : null;
+  const finalHum2 = isValidFloat(humidity2) ? (humidity2 ?? null) : null;
 
   try {
+    const hasLiveValidGps = (gpsValid === true || gpsValid === "true") &&
+      latitude != null && longitude != null &&
+      Number.isFinite(latitude) && Number.isFinite(longitude) &&
+      latitude >= -90 && latitude <= 90 &&
+      longitude >= -180 && longitude <= 180;
+
+    let finalLat = null;
+    let finalLng = null;
+    let finalAlt = null;
+    let finalSats = null;
+    let finalGpsValid = false;
+
+    if (hasLiveValidGps) {
+      finalLat = latitude;
+      finalLng = longitude;
+      finalAlt = altitude ?? null;
+      finalSats = satellites ?? null;
+      finalGpsValid = true;
+    } else {
+      const prevGps = await pool.query(
+        `SELECT latitude, longitude, altitude, satellites
+         FROM device_readings
+         WHERE device_id = $1
+           AND gps_valid = TRUE
+           AND latitude IS NOT NULL
+           AND longitude IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [deviceId]
+      );
+
+      if (prevGps.rows.length > 0) {
+        finalLat = prevGps.rows[0].latitude;
+        finalLng = prevGps.rows[0].longitude;
+        finalAlt = prevGps.rows[0].altitude;
+        finalSats = prevGps.rows[0].satellites;
+        finalGpsValid = false;
+      }
+    }
+
     const result = await pool.query(
-      `INSERT INTO device_readings
-       (device_id, temperature, humidity, latitude, longitude)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [deviceId, temperature ?? null, humidity ?? null, latitude ?? null, longitude ?? null]
+      `INSERT INTO device_readings (
+        device_id,
+        temperature,
+        humidity,
+        temperature1,
+        humidity1,
+        temperature2,
+        humidity2,
+        soil_moisture_raw,
+        rain_sensor_raw,
+        soil1,
+        soil2,
+        rain,
+        latitude,
+        longitude,
+        altitude,
+        satellites,
+        gps_valid
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      RETURNING *`,
+      [
+        deviceId,
+        finalTemp,
+        finalHum,
+        finalTemp1,
+        finalHum1,
+        finalTemp2,
+        finalHum2,
+        finalSoilMoisture ?? null,
+        finalRain ?? null,
+        finalSoilMoisture ?? null,
+        soil2 ?? null,
+        finalRain ?? null,
+        finalLat,
+        finalLng,
+        finalAlt,
+        finalSats,
+        finalGpsValid,
+      ]
     );
-    res.status(201).json({ success: true, data: result.rows[0] });
+
+    const saved = result.rows[0];
+
+    res.status(201).json({
+      success: true,
+      message: "Device telemetry received",
+      data: {
+        id: saved.id,
+        device_id: saved.device_id,
+        deviceId: saved.device_id,
+        temperature: saved.temperature,
+        humidity: saved.humidity,
+        soil_moisture_raw: saved.soil_moisture_raw,
+        soilMoistureRaw: saved.soil_moisture_raw,
+        rain_sensor_raw: saved.rain_sensor_raw,
+        rainSensorRaw: saved.rain_sensor_raw,
+        gps_valid: saved.gps_valid,
+        gpsValid: saved.gps_valid,
+        latitude: saved.latitude,
+        longitude: saved.longitude,
+        altitude: saved.altitude,
+        satellites: saved.satellites,
+        created_at: saved.created_at,
+      },
+    });
   } catch (error) {
     console.error("Database insert failed:", error.message);
     res.status(500).json({ error: "Database operation failed" });
@@ -51,20 +197,71 @@ app.get(["/api/device/data", "/api/device/data/latest"], async (req, res) => {
   const deviceId = req.query?.deviceId || "esp32-001";
   try {
     const result = await pool.query(
-      `SELECT * FROM device_readings
+      `SELECT
+         device_id,
+         temperature,
+         humidity,
+         temperature1,
+         humidity1,
+         temperature2,
+         humidity2,
+         soil_moisture_raw,
+         rain_sensor_raw,
+         soil1,
+         soil2,
+         rain,
+         latitude,
+         longitude,
+         altitude,
+         satellites,
+         gps_valid,
+         created_at
+       FROM device_readings
        WHERE device_id = $1
        ORDER BY created_at DESC
        LIMIT 1`,
       [deviceId]
     );
-    res.json({ success: true, data: result.rows[0] ?? null });
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, data: null });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      success: true,
+      data: {
+        device_id: row.device_id,
+        deviceId: row.device_id,
+        temperature: row.temperature,
+        humidity: row.humidity,
+        temperature1: row.temperature1,
+        humidity1: row.humidity1,
+        temperature2: row.temperature2,
+        humidity2: row.humidity2,
+        soil_moisture_raw: row.soil_moisture_raw ?? row.soil1,
+        soilMoistureRaw: row.soil_moisture_raw ?? row.soil1,
+        rain_sensor_raw: row.rain_sensor_raw ?? row.rain,
+        rainSensorRaw: row.rain_sensor_raw ?? row.rain,
+        soil1: row.soil1 ?? row.soil_moisture_raw,
+        soil2: row.soil2,
+        rain: row.rain ?? row.rain_sensor_raw,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        altitude: row.altitude,
+        satellites: row.satellites,
+        gps_valid: row.gps_valid,
+        gpsValid: row.gps_valid,
+        created_at: row.created_at,
+      },
+    });
   } catch (error) {
     console.error("GET latest data failed:", error.message);
     res.status(500).json({ error: "Database query failed" });
   }
 });
 
-// --- Device Heartbeat ---
+// --- Device Heartbeat (Open) ---
 app.post("/api/device/heartbeat", async (req, res) => {
   const { deviceId = "esp32-001" } = req.body || {};
 
@@ -84,7 +281,7 @@ app.post("/api/device/heartbeat", async (req, res) => {
   }
 });
 
-// --- Device Online/Offline Status ---
+// --- Device Online/Offline Status (Open) ---
 app.get("/api/device/status", async (req, res) => {
   const deviceId = req.query?.deviceId || "esp32-001";
   try {
@@ -96,8 +293,7 @@ app.get("/api/device/status", async (req, res) => {
        FROM device_readings
        WHERE device_id = $1
        ORDER BY created_at DESC
-       LIMIT 1`,
-      [deviceId]
+       LIMIT 1`
     );
 
     if (result.rows.length === 0) {
@@ -129,7 +325,7 @@ app.get("/api/device/status", async (req, res) => {
   }
 });
 
-// --- Open Relay Command Polling (No auth required) ---
+// --- Relay Command Polling (Open) ---
 app.get("/api/device/relay/command", async (req, res) => {
   const deviceId = req.query?.deviceId || "esp32-001";
 
@@ -166,7 +362,7 @@ app.get("/api/device/relay/command", async (req, res) => {
   }
 });
 
-// --- Open Relay Control (No auth required, supports partial updates) ---
+// --- Relay Control (Open) ---
 app.post("/api/device/relay", async (req, res) => {
   const { deviceId: inputDeviceId, relay1, relay2, relay } = req.body || {};
   const deviceId = inputDeviceId || "esp32-001";
@@ -221,7 +417,7 @@ app.post("/api/device/relay", async (req, res) => {
   }
 });
 
-// --- Open Relay Query ---
+// --- Relay Query (Open) ---
 app.get("/api/device/relay", async (req, res) => {
   const deviceId = req.query?.deviceId || "esp32-001";
 

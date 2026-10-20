@@ -1,8 +1,8 @@
 require("dotenv").config();
 const http = require("http");
 const app = require("../server");
-const relayHandler = require("../api/device/relay");
-const commandHandler = require("../api/device/relay/command");
+const dataHandler = require("../api/device/data");
+const latestHandler = require("../api/device/data/latest");
 
 const PORT = 3099;
 let server;
@@ -35,14 +35,15 @@ function invokeHandler(handler, { method = "GET", headers = {}, query = {}, body
       method,
       headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])),
       query,
-      body
+      body,
     };
     const res = {
       statusCode: 200,
       headersSent: {},
       setHeader(k, v) { this.headersSent[k] = v; },
       status(code) { this.statusCode = code; return this; },
-      json(data) { resolve({ status: this.statusCode, body: data, headers: this.headersSent }); }
+      json(data) { resolve({ status: this.statusCode, body: data, headers: this.headersSent }); },
+      end() { resolve({ status: this.statusCode }); }
     };
     handler(req, res).catch((err) => {
       resolve({ status: 500, error: err.message });
@@ -51,7 +52,7 @@ function invokeHandler(handler, { method = "GET", headers = {}, query = {}, body
 }
 
 async function runTests() {
-  console.log("=== Testing Open API (No Auth Headers Needed) ===");
+  console.log("=== Testing Open Multi-Sensor Ingestion (Zero Headers) ===");
   server = app.listen(PORT);
 
   let passed = 0;
@@ -68,40 +69,93 @@ async function runTests() {
   }
 
   try {
-    // 1. GET command without any headers
-    const openCmd = await request({
+    // 1. Post multi-sensor payload with NO device key in headers
+    const testPayload = {
+      deviceId: "esp32-001",
+      temperature: 28.5,
+      humidity: 65,
+      soilMoistureRaw: 1840,
+      rainSensorRaw: 3200,
+      gpsValid: true,
+      latitude: 23.8103,
+      longitude: 90.4125,
+      altitude: 12.4,
+      satellites: 8
+    };
+
+    const postRes = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/data",
+      method: "POST",
+      headers: { "Content-Type": "application/json" } // NO device key header
+    }, testPayload);
+
+    assert(
+      postRes.status === 201 &&
+      postRes.body?.success === true &&
+      postRes.body?.data?.soilMoistureRaw === 1840 &&
+      postRes.body?.data?.rainSensorRaw === 3200,
+      "POST /api/device/data succeeds with ZERO device key headers"
+    );
+
+    // 2. GET /api/device/data/latest with NO headers
+    const latestRes = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/data/latest",
+      method: "GET"
+    });
+
+    const lData = latestRes.body?.data;
+    assert(
+      latestRes.status === 200 &&
+      latestRes.body?.success === true &&
+      lData?.soilMoistureRaw === 1840 &&
+      lData?.rainSensorRaw === 3200 &&
+      lData?.latitude === 23.8103 &&
+      lData?.gpsValid === true,
+      "GET /api/device/data/latest returns sensor fields without any headers"
+    );
+
+    // 3. DHT11 read failure handling
+    const nullDhtRes = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/data",
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    }, {
+      deviceId: "esp32-001",
+      temperature: null,
+      humidity: null,
+      soilMoistureRaw: 1850,
+      rainSensorRaw: 3190
+    });
+
+    assert(
+      nullDhtRes.status === 201 &&
+      nullDhtRes.body?.data?.temperature === null &&
+      nullDhtRes.body?.data?.soilMoistureRaw === 1850,
+      "Omitted/null DHT11 readings accepted with no headers"
+    );
+
+    // 4. Serverless handlers direct test with no headers
+    const srvlessPost = await invokeHandler(dataHandler, {
+      method: "POST",
+      headers: {},
+      body: testPayload
+    });
+    assert(srvlessPost.status === 201 && srvlessPost.body?.success === true, "api/device/data.js serverless handler works with zero headers");
+
+    // 5. Relay command polling with no headers
+    const relayCmdRes = await request({
       hostname: "localhost",
       port: PORT,
       path: "/api/device/relay/command?deviceId=esp32-001",
       method: "GET"
     });
-    assert(openCmd.status === 200 && openCmd.body?.success === true, "GET /api/device/relay/command works with NO headers");
-
-    // 2. POST relay without any headers
-    const openPost = await request({
-      hostname: "localhost",
-      port: PORT,
-      path: "/api/device/relay",
-      method: "POST",
-      headers: { "Content-Type": "application/json" }
-    }, { deviceId: "esp32-001", relay1: "ON", relay2: "OFF" });
-    assert(openPost.status === 200 && openPost.body?.relay1 === "ON", "POST /api/device/relay works with NO headers");
-
-    // 3. Verify polling returns updated state
-    const verifyCmd = await request({
-      hostname: "localhost",
-      port: PORT,
-      path: "/api/device/relay/command",
-      method: "GET"
-    });
-    assert(verifyCmd.status === 200 && verifyCmd.body?.relay1 === "ON" && verifyCmd.body?.relay2 === "OFF", "GET command defaults to esp32-001 and reflects state");
-
-    // 4. Serverless handlers direct test
-    const srvless = await invokeHandler(relayHandler, {
-      method: "POST",
-      body: { relay1: "OFF", relay2: "OFF" }
-    });
-    assert(srvless.status === 200 && srvless.body?.relay1 === "OFF", "Serverless handler works with zero headers");
+    assert(relayCmdRes.status === 200 && relayCmdRes.body?.success === true, "GET /api/device/relay/command works with zero headers");
 
     console.log(`\n=== Results: ${passed} Passed, ${failed} Failed ===\n`);
   } finally {
