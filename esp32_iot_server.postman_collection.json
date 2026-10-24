@@ -19,6 +19,50 @@
   ],
   "item": [
     {
+      "name": "0. Device Authentication & Connection",
+      "item": [
+        {
+          "name": "POST Device Auth & Connect (Key + Name)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"name\": \"ESP32 Agricultural Master\",\n  \"key\": \"102030\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/auth",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "auth"]
+            }
+          }
+        },
+        {
+          "name": "GET Device Auth & Connection Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/auth?deviceId={{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "auth"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "{{deviceId}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "1. Multi-Sensor Telemetry",
       "item": [
         {

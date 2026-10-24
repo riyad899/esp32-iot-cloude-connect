@@ -5,6 +5,7 @@ const dataHandler = require("../api/device/data");
 const latestHandler = require("../api/device/data/latest");
 const statusHandler = require("../api/device/status");
 const commandHandler = require("../api/device/relay/command");
+const authHandler = require("../api/device/auth");
 
 const PORT = 3099;
 let server;
@@ -205,6 +206,68 @@ async function runTests() {
       query: { deviceId: "esp32-001" }
     });
     assert(srvCmd.status === 200 && srvCmd.body?.success === true, "api/device/relay/command.js serverless handler works");
+
+    // 7. Test POST /api/device/auth with Key and Name
+    const authSuccess = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/auth",
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    }, {
+      deviceId: "esp32-001",
+      name: "ESP32 Master Agro",
+      key: "102030"
+    });
+    assert(
+      authSuccess.status === 200 &&
+      authSuccess.body?.success === true &&
+      authSuccess.body?.connected === true &&
+      authSuccess.body?.status === "online" &&
+      typeof authSuccess.body?.device?.token === "string",
+      "POST /api/device/auth connects device with Key and Name"
+    );
+
+    // 8. Test POST /api/device/auth rejects wrong key
+    const authWrongKey = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/auth",
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    }, {
+      deviceId: "esp32-001",
+      name: "ESP32 Master Agro",
+      key: "wrong_password"
+    });
+    assert(authWrongKey.status === 401 && authWrongKey.body?.connected === false, "POST /api/device/auth rejects wrong key");
+
+    // 9. Test GET /api/device/auth returns connection info
+    const authGet = await request({
+      hostname: "localhost",
+      port: PORT,
+      path: "/api/device/auth?deviceId=esp32-001",
+      method: "GET"
+    });
+    assert(
+      authGet.status === 200 &&
+      authGet.body?.success === true &&
+      authGet.body?.connected === true &&
+      authGet.body?.name === "ESP32 Master Agro",
+      "GET /api/device/auth returns connected device name and status"
+    );
+
+    // 10. Test serverless authHandler directly
+    const srvAuth = await invokeHandler(authHandler, {
+      method: "POST",
+      body: { deviceId: "esp32-001", name: "ESP32 Master Agro", key: "102030" }
+    });
+    assert(
+      srvAuth.status === 200 &&
+      srvAuth.body?.success === true &&
+      srvAuth.body?.connected === true,
+      "api/device/auth.js serverless handler works"
+    );
 
     console.log(`\n=== Results: ${passed} Passed, ${failed} Failed ===\n`);
   } finally {
