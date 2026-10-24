@@ -306,13 +306,13 @@ app.get("/api/device/status", async (req, res) => {
 
     const device = result.rows[0];
     const seconds = Number(device.seconds_since_seen);
-    const isActive = seconds <= 60;
+    const isOnline = seconds <= 420; // 7 minutes threshold (device posts every 5 minutes)
 
     return res.status(200).json({
       success: true,
       deviceId: device.device_id,
-      status: isActive ? "active" : "offline",
-      active: isActive,
+      status: isOnline ? "online" : "offline",
+      active: isOnline,
       lastSeen: device.last_seen,
       secondsSinceLastSeen: Math.floor(seconds),
     });
