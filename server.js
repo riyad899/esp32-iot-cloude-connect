@@ -4,26 +4,179 @@ const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
 const crypto = require("crypto");
+const path = require("path");
+const EventEmitter = require("events");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve static frontend files from public directory
+app.use(express.static(path.join(__dirname, "public")));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: true },
 });
 
+// Real-time Event Emitter for Water Level Updates
+const waterLevelEmitter = new EventEmitter();
+waterLevelEmitter.setMaxListeners(100);
+global.__waterLevelEmitter = waterLevelEmitter;
+
 // --- Health Check ---
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// --- Multi-Sensor Device Telemetry Ingestion (Open - No headers required) ---
+// --- Device Telemetry Ingestion (Multi-Sensor Agro & Water Level Monitor) ---
 app.post("/api/device/data", async (req, res) => {
-  const body = req.body || {};
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({ error: "Malformed JSON payload: JSON object expected" });
+  }
+
+  const inputDeviceId = body.deviceId;
+  if (!inputDeviceId || typeof inputDeviceId !== "string" || !inputDeviceId.trim()) {
+    return res.status(400).json({ error: "Missing or invalid deviceId. Must be a non-empty string." });
+  }
+  const deviceId = inputDeviceId.trim();
+
+  // Branch 1: Water Level Monitor (ESP-12F)
+  const isWaterLevelPayload =
+    deviceId === "esp12f-water-001" ||
+    body.distanceCm !== undefined ||
+    body.waterLevelCm !== undefined ||
+    body.waterLevelPercent !== undefined;
+
+  if (isWaterLevelPayload) {
+    if (deviceId !== "esp12f-water-001") {
+      return res.status(400).json({ error: `Unknown water monitoring deviceId: '${deviceId}'. Expected 'esp12f-water-001'` });
+    }
+
+    const { sensorValid, distanceCm, waterLevelCm, waterLevelPercent } = body;
+
+    let parsedSensorValid = true;
+    if (sensorValid !== undefined && sensorValid !== null) {
+      if (typeof sensorValid === "boolean") {
+        parsedSensorValid = sensorValid;
+      } else if (sensorValid === "true") {
+        parsedSensorValid = true;
+      } else if (sensorValid === "false") {
+        parsedSensorValid = false;
+      } else {
+        return res.status(400).json({ error: "Invalid sensorValid value. Must be a boolean (true/false)" });
+      }
+    }
+
+    if (parsedSensorValid) {
+      if (typeof distanceCm !== "number" || !Number.isFinite(distanceCm) || distanceCm < 0 || distanceCm > 2000) {
+        return res.status(400).json({ error: "Invalid distanceCm. Must be a non-negative finite number (0-2000 cm)" });
+      }
+      if (typeof waterLevelCm !== "number" || !Number.isFinite(waterLevelCm) || waterLevelCm < 0 || waterLevelCm > 2000) {
+        return res.status(400).json({ error: "Invalid waterLevelCm. Must be a non-negative finite number (0-2000 cm)" });
+      }
+      if (typeof waterLevelPercent !== "number" || !Number.isFinite(waterLevelPercent) || waterLevelPercent < 0 || waterLevelPercent > 100) {
+        return res.status(400).json({ error: "Invalid waterLevelPercent. Must be a number between 0 and 100" });
+      }
+    } else {
+      const isValidOrNull = (val) => val === undefined || val === null || (typeof val === "number" && Number.isFinite(val));
+      if (!isValidOrNull(distanceCm) || !isValidOrNull(waterLevelCm) || !isValidOrNull(waterLevelPercent)) {
+        return res.status(400).json({ error: "Invalid measurement values when sensorValid is false. Expected number or null" });
+      }
+      if (typeof waterLevelPercent === "number" && (waterLevelPercent < 0 || waterLevelPercent > 100)) {
+        return res.status(400).json({ error: "Invalid waterLevelPercent. Must be between 0 and 100" });
+      }
+    }
+
+    const finalDistance = parsedSensorValid ? distanceCm : (typeof distanceCm === "number" ? distanceCm : null);
+    const finalWaterCm = parsedSensorValid ? waterLevelCm : (typeof waterLevelCm === "number" ? waterLevelCm : null);
+    const finalPercent = parsedSensorValid ? waterLevelPercent : (typeof waterLevelPercent === "number" ? waterLevelPercent : null);
+
+    try {
+      const upsertResult = await pool.query(
+        `INSERT INTO device_readings (
+          device_id,
+          distance_cm,
+          water_level_cm,
+          water_level_percent,
+          sensor_valid,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (device_id)
+        DO UPDATE SET
+          distance_cm = EXCLUDED.distance_cm,
+          water_level_cm = EXCLUDED.water_level_cm,
+          water_level_percent = EXCLUDED.water_level_percent,
+          sensor_valid = EXCLUDED.sensor_valid,
+          created_at = NOW()
+        RETURNING *`,
+        [deviceId, finalDistance, finalWaterCm, finalPercent, parsedSensorValid]
+      );
+
+      await pool.query(
+        `INSERT INTO water_level_history (
+          device_id,
+          distance_cm,
+          water_level_cm,
+          water_level_percent,
+          sensor_valid,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [deviceId, finalDistance, finalWaterCm, finalPercent, parsedSensorValid]
+      );
+
+      await pool.query(
+        `INSERT INTO device_status (device_id, last_seen)
+         VALUES ($1, NOW())
+         ON CONFLICT (device_id)
+         DO UPDATE SET last_seen = NOW()`,
+        [deviceId]
+      );
+
+      const saved = upsertResult.rows[0];
+
+      const eventPayload = {
+        deviceId: saved.device_id,
+        sensorValid: saved.sensor_valid,
+        distanceCm: saved.distance_cm,
+        waterLevelCm: saved.water_level_cm,
+        waterLevelPercent: saved.water_level_percent,
+        recordedAt: saved.created_at,
+      };
+
+      waterLevelEmitter.emit("water-level:update", eventPayload);
+
+      return res.status(201).json({
+        success: true,
+        message: "Water level telemetry received",
+        data: {
+          id: saved.id,
+          device_id: saved.device_id,
+          deviceId: saved.device_id,
+          sensor_valid: saved.sensor_valid,
+          sensorValid: saved.sensor_valid,
+          distance_cm: saved.distance_cm,
+          distanceCm: saved.distance_cm,
+          water_level_cm: saved.water_level_cm,
+          waterLevelCm: saved.water_level_cm,
+          water_level_percent: saved.water_level_percent,
+          waterLevelPercent: saved.water_level_percent,
+          created_at: saved.created_at,
+        },
+      });
+    } catch (error) {
+      console.error("POST water-level insert failed:", error.message);
+      return res.status(500).json({ error: "Database operation failed" });
+    }
+  }
+
+  // Branch 2: Existing ESP32 Agro Telemetry
+  if (deviceId !== "esp32-001") {
+    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001' or 'esp12f-water-001'" });
+  }
+
   const {
-    deviceId: inputDeviceId,
     temperature,
     humidity,
     temperature1,
@@ -41,11 +194,6 @@ app.post("/api/device/data", async (req, res) => {
     altitude,
     satellites,
   } = body;
-
-  const deviceId = inputDeviceId || "esp32-001";
-  if (deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
-  }
 
   const isValidFloat = (val) => val === undefined || val === null || (typeof val === "number" && Number.isFinite(val));
   const isValidInteger = (val) => val === undefined || val === null || (typeof val === "number" && Number.isInteger(val));
@@ -87,7 +235,6 @@ app.post("/api/device/data", async (req, res) => {
       latitude >= -90 && latitude <= 90 &&
       longitude >= -180 && longitude <= 180;
 
-    // Satellites must strictly reflect the current reading — show null if not provided, never a static fallback
     const finalSats = (typeof satellites === "number" && Number.isInteger(satellites) && satellites >= 0)
       ? satellites
       : null;
@@ -159,9 +306,17 @@ app.post("/api/device/data", async (req, res) => {
       ]
     );
 
+    await pool.query(
+      `INSERT INTO device_status (device_id, last_seen)
+       VALUES ($1, NOW())
+       ON CONFLICT (device_id)
+       DO UPDATE SET last_seen = NOW()`,
+      [deviceId]
+    );
+
     const saved = result.rows[0];
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Device telemetry received",
       data: {
@@ -185,7 +340,7 @@ app.post("/api/device/data", async (req, res) => {
     });
   } catch (error) {
     console.error("Database insert failed:", error.message);
-    res.status(500).json({ error: "Database operation failed" });
+    return res.status(500).json({ error: "Database operation failed" });
   }
 });
 
@@ -212,6 +367,10 @@ app.get(["/api/device/data", "/api/device/data/latest"], async (req, res) => {
          altitude,
          satellites,
          gps_valid,
+         distance_cm,
+         water_level_cm,
+         water_level_percent,
+         sensor_valid,
          created_at
        FROM device_readings
        WHERE device_id = $1
@@ -225,7 +384,27 @@ app.get(["/api/device/data", "/api/device/data/latest"], async (req, res) => {
     }
 
     const row = result.rows[0];
-    res.json({
+
+    if (deviceId === "esp12f-water-001" || row.distance_cm !== null || row.water_level_cm !== null) {
+      return res.json({
+        success: true,
+        data: {
+          device_id: row.device_id,
+          deviceId: row.device_id,
+          sensor_valid: row.sensor_valid,
+          sensorValid: row.sensor_valid,
+          distance_cm: row.distance_cm,
+          distanceCm: row.distance_cm,
+          water_level_cm: row.water_level_cm,
+          waterLevelCm: row.water_level_cm,
+          water_level_percent: row.water_level_percent,
+          waterLevelPercent: row.water_level_percent,
+          created_at: row.created_at,
+        },
+      });
+    }
+
+    return res.json({
       success: true,
       data: {
         device_id: row.device_id,
@@ -254,8 +433,84 @@ app.get(["/api/device/data", "/api/device/data/latest"], async (req, res) => {
     });
   } catch (error) {
     console.error("GET latest data failed:", error.message);
-    res.status(500).json({ error: "Database query failed" });
+    return res.status(500).json({ error: "Database query failed" });
   }
+});
+
+// --- Water Level Historical Readings Query ---
+app.get("/api/device/water-level/history", async (req, res) => {
+  const deviceId = req.query?.deviceId || "esp12f-water-001";
+  const rawLimit = parseInt(req.query?.limit, 10);
+  const limit = (!isNaN(rawLimit) && rawLimit > 0) ? Math.min(rawLimit, 100) : 20;
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         id,
+         device_id,
+         distance_cm,
+         water_level_cm,
+         water_level_percent,
+         sensor_valid,
+         created_at
+       FROM water_level_history
+       WHERE device_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [deviceId, limit]
+    );
+
+    return res.json({
+      success: true,
+      deviceId,
+      count: result.rows.length,
+      limit,
+      data: result.rows.map((r) => ({
+        id: r.id,
+        deviceId: r.device_id,
+        device_id: r.device_id,
+        distanceCm: r.distance_cm,
+        distance_cm: r.distance_cm,
+        waterLevelCm: r.water_level_cm,
+        water_level_cm: r.water_level_cm,
+        waterLevelPercent: r.water_level_percent,
+        water_level_percent: r.water_level_percent,
+        sensorValid: r.sensor_valid,
+        sensor_valid: r.sensor_valid,
+        createdAt: r.created_at,
+        created_at: r.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error("GET water-level history failed:", error.message);
+    return res.status(500).json({ error: "Database query failed" });
+  }
+});
+
+// --- Real-time Server-Sent Events (SSE) Stream ---
+app.get("/api/device/water-level/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if (res.flushHeaders) res.flushHeaders();
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ status: "connected", timestamp: new Date().toISOString() })}\n\n`);
+
+  const onUpdate = (data) => {
+    res.write(`event: water-level:update\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  waterLevelEmitter.on("water-level:update", onUpdate);
+
+  const heartbeat = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 15000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    waterLevelEmitter.off("water-level:update", onUpdate);
+  });
 });
 
 // --- Device Heartbeat (Open) ---
@@ -307,7 +562,7 @@ app.get("/api/device/status", async (req, res) => {
 
     const device = result.rows[0];
     const seconds = Number(device.seconds_since_seen);
-    const isOnline = seconds <= 420; // 7 minutes threshold (device posts every 5 minutes)
+    const isOnline = seconds <= 420; // 7 minutes threshold
 
     return res.status(200).json({
       success: true,
@@ -464,6 +719,7 @@ const handleDeviceAuth = async (req, res) => {
         `SELECT 
           d.device_id,
           d.device_name,
+          d.device_type,
           d.is_connected,
           d.last_connected_at,
           s.last_seen,
@@ -493,6 +749,8 @@ const handleDeviceAuth = async (req, res) => {
         success: true,
         deviceId: row.device_id,
         name: row.device_name,
+        deviceType: row.device_type || (row.device_id === "esp12f-water-001" ? "water-level-monitor" : "agro-monitor"),
+        device_type: row.device_type || (row.device_id === "esp12f-water-001" ? "water-level-monitor" : "agro-monitor"),
         connected: Boolean(row.is_connected),
         status: isOnline ? "online" : "offline",
         lastConnectedAt: row.last_connected_at,
@@ -509,6 +767,7 @@ const handleDeviceAuth = async (req, res) => {
   const body = req.body || {};
   const key = body.key || body.deviceKey || body.device_key || req.headers["x-device-key"];
   const name = body.name || body.deviceName || body.device_name;
+  const deviceType = body.deviceType || body.device_type || (body.deviceId === "esp12f-water-001" ? "water-level-monitor" : "agro-monitor");
   const deviceId = (body.deviceId || body.device_id || "esp32-001").trim();
 
   if (!key || !String(key).trim()) {
@@ -555,16 +814,17 @@ const handleDeviceAuth = async (req, res) => {
     }
 
     const upsertResult = await pool.query(
-      `INSERT INTO registered_devices (device_id, device_name, device_key, is_connected, last_connected_at, updated_at)
-       VALUES ($1, $2, $3, true, NOW(), NOW())
+      `INSERT INTO registered_devices (device_id, device_name, device_key, device_type, is_connected, last_connected_at, updated_at)
+       VALUES ($1, $2, $3, $4, true, NOW(), NOW())
        ON CONFLICT (device_id) DO UPDATE SET
          device_name = EXCLUDED.device_name,
          device_key = EXCLUDED.device_key,
+         device_type = EXCLUDED.device_type,
          is_connected = true,
          last_connected_at = NOW(),
          updated_at = NOW()
-       RETURNING device_id, device_name, is_connected, last_connected_at`,
-      [deviceId, cleanName, cleanKey]
+       RETURNING device_id, device_name, device_type, is_connected, last_connected_at`,
+      [deviceId, cleanName, cleanKey, deviceType]
     );
 
     await pool.query(
@@ -586,6 +846,7 @@ const handleDeviceAuth = async (req, res) => {
       device: {
         deviceId: reg.device_id,
         name: reg.device_name,
+        deviceType: reg.device_type,
         status: "online",
         connected: true,
         lastConnectedAt: reg.last_connected_at,
@@ -601,27 +862,17 @@ const handleDeviceAuth = async (req, res) => {
         sendTelemetry: {
           method: "POST",
           endpoint: "/api/device/data",
-          description: "ESP32 sends sensor telemetry every 5 mins",
+          description: "ESP device sends sensor telemetry",
         },
         getLatestData: {
           method: "GET",
           endpoint: `/api/device/data/latest?deviceId=${reg.device_id}`,
-          description: "Get latest sensor readings and GPS location",
+          description: "Get latest sensor readings",
         },
         getDeviceStatus: {
           method: "GET",
           endpoint: `/api/device/status?deviceId=${reg.device_id}`,
           description: "Check device online/offline heartbeat status",
-        },
-        pollRelayCommand: {
-          method: "GET",
-          endpoint: `/api/device/relay/command?deviceId=${reg.device_id}`,
-          description: "Poll relay command for water pump and solenoid valve",
-        },
-        controlRelay: {
-          method: "POST",
-          endpoint: "/api/device/relay",
-          description: "Turn relay1 (pump) or relay2 ON/OFF",
         },
       },
     });
@@ -639,6 +890,11 @@ app.get("/api/device/auth", handleDeviceAuth);
 app.post("/api/device/auth", handleDeviceAuth);
 app.get("/api/device/connect", handleDeviceAuth);
 app.post("/api/device/connect", handleDeviceAuth);
+
+// Root route serves dashboard
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
 if (require.main === module) {
   const port = process.env.PORT || 3000;

@@ -47,6 +47,10 @@ module.exports = async function handler(req, res) {
         altitude,
         satellites,
         gps_valid,
+        distance_cm,
+        water_level_cm,
+        water_level_percent,
+        sensor_valid,
         created_at
       FROM device_readings
       WHERE device_id = ${deviceId}
@@ -62,6 +66,28 @@ module.exports = async function handler(req, res) {
     }
 
     const row = rows[0];
+
+    // Water level device response
+    if (deviceId === "esp12f-water-001" || row.distance_cm !== null || row.water_level_cm !== null) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          device_id: row.device_id,
+          deviceId: row.device_id,
+          sensor_valid: row.sensor_valid,
+          sensorValid: row.sensor_valid,
+          distance_cm: row.distance_cm,
+          distanceCm: row.distance_cm,
+          water_level_cm: row.water_level_cm,
+          waterLevelCm: row.water_level_cm,
+          water_level_percent: row.water_level_percent,
+          waterLevelPercent: row.water_level_percent,
+          created_at: row.created_at,
+        },
+      });
+    }
+
+    // Default ESP32 Agro device response
     return res.status(200).json({
       success: true,
       data: {

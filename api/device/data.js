@@ -39,6 +39,10 @@ module.exports = async function handler(req, res) {
           altitude,
           satellites,
           gps_valid,
+          distance_cm,
+          water_level_cm,
+          water_level_percent,
+          sensor_valid,
           created_at
         FROM device_readings
         WHERE device_id = ${deviceId}
@@ -53,6 +57,26 @@ module.exports = async function handler(req, res) {
       }
 
       const row = rows[0];
+
+      if (deviceId === "esp12f-water-001" || row.distance_cm !== null || row.water_level_cm !== null) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            device_id: row.device_id,
+            deviceId: row.device_id,
+            sensor_valid: row.sensor_valid,
+            sensorValid: row.sensor_valid,
+            distance_cm: row.distance_cm,
+            distanceCm: row.distance_cm,
+            water_level_cm: row.water_level_cm,
+            waterLevelCm: row.water_level_cm,
+            water_level_percent: row.water_level_percent,
+            waterLevelPercent: row.water_level_percent,
+            created_at: row.created_at,
+          },
+        });
+      }
+
       return res.status(200).json({
         success: true,
         data: {
@@ -95,9 +119,166 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: "Database is not configured" });
   }
 
-  const body = req.body ?? {};
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({ error: "Malformed JSON payload: JSON object expected" });
+  }
+
+  const inputDeviceId = body.deviceId;
+  if (!inputDeviceId || typeof inputDeviceId !== "string" || !inputDeviceId.trim()) {
+    return res.status(400).json({ error: "Missing or invalid deviceId. Must be a non-empty string." });
+  }
+  const deviceId = inputDeviceId.trim();
+
+  // Route 1: Water Level Monitor (ESP-12F)
+  const isWaterLevelPayload =
+    deviceId === "esp12f-water-001" ||
+    body.distanceCm !== undefined ||
+    body.waterLevelCm !== undefined ||
+    body.waterLevelPercent !== undefined;
+
+  if (isWaterLevelPayload) {
+    if (deviceId !== "esp12f-water-001") {
+      return res.status(400).json({ error: `Unknown water monitoring deviceId: '${deviceId}'. Expected 'esp12f-water-001'` });
+    }
+
+    const { sensorValid, distanceCm, waterLevelCm, waterLevelPercent } = body;
+
+    let parsedSensorValid = true;
+    if (sensorValid !== undefined && sensorValid !== null) {
+      if (typeof sensorValid === "boolean") {
+        parsedSensorValid = sensorValid;
+      } else if (sensorValid === "true") {
+        parsedSensorValid = true;
+      } else if (sensorValid === "false") {
+        parsedSensorValid = false;
+      } else {
+        return res.status(400).json({ error: "Invalid sensorValid value. Must be a boolean (true/false)" });
+      }
+    }
+
+    if (parsedSensorValid) {
+      if (typeof distanceCm !== "number" || !Number.isFinite(distanceCm) || distanceCm < 0 || distanceCm > 2000) {
+        return res.status(400).json({ error: "Invalid distanceCm. Must be a non-negative finite number (0-2000 cm)" });
+      }
+      if (typeof waterLevelCm !== "number" || !Number.isFinite(waterLevelCm) || waterLevelCm < 0 || waterLevelCm > 2000) {
+        return res.status(400).json({ error: "Invalid waterLevelCm. Must be a non-negative finite number (0-2000 cm)" });
+      }
+      if (typeof waterLevelPercent !== "number" || !Number.isFinite(waterLevelPercent) || waterLevelPercent < 0 || waterLevelPercent > 100) {
+        return res.status(400).json({ error: "Invalid waterLevelPercent. Must be a number between 0 and 100" });
+      }
+    } else {
+      const isValidOrNull = (val) => val === undefined || val === null || (typeof val === "number" && Number.isFinite(val));
+      if (!isValidOrNull(distanceCm) || !isValidOrNull(waterLevelCm) || !isValidOrNull(waterLevelPercent)) {
+        return res.status(400).json({ error: "Invalid measurement values when sensorValid is false. Expected number or null" });
+      }
+      if (typeof waterLevelPercent === "number" && (waterLevelPercent < 0 || waterLevelPercent > 100)) {
+        return res.status(400).json({ error: "Invalid waterLevelPercent. Must be a number between 0 and 100" });
+      }
+    }
+
+    const finalDistance = parsedSensorValid ? distanceCm : (typeof distanceCm === "number" ? distanceCm : null);
+    const finalWaterCm = parsedSensorValid ? waterLevelCm : (typeof waterLevelCm === "number" ? waterLevelCm : null);
+    const finalPercent = parsedSensorValid ? waterLevelPercent : (typeof waterLevelPercent === "number" ? waterLevelPercent : null);
+
+    try {
+      const sql = neon(process.env.DATABASE_URL);
+
+      const rows = await sql`
+        INSERT INTO device_readings (
+          device_id,
+          distance_cm,
+          water_level_cm,
+          water_level_percent,
+          sensor_valid,
+          created_at
+        ) VALUES (
+          ${deviceId},
+          ${finalDistance},
+          ${finalWaterCm},
+          ${finalPercent},
+          ${parsedSensorValid},
+          NOW()
+        )
+        ON CONFLICT (device_id)
+        DO UPDATE SET
+          distance_cm = EXCLUDED.distance_cm,
+          water_level_cm = EXCLUDED.water_level_cm,
+          water_level_percent = EXCLUDED.water_level_percent,
+          sensor_valid = EXCLUDED.sensor_valid,
+          created_at = NOW()
+        RETURNING *
+      `;
+
+      await sql`
+        INSERT INTO water_level_history (
+          device_id,
+          distance_cm,
+          water_level_cm,
+          water_level_percent,
+          sensor_valid,
+          created_at
+        ) VALUES (
+          ${deviceId},
+          ${finalDistance},
+          ${finalWaterCm},
+          ${finalPercent},
+          ${parsedSensorValid},
+          NOW()
+        )
+      `;
+
+      await sql`
+        INSERT INTO device_status (device_id, last_seen)
+        VALUES (${deviceId}, NOW())
+        ON CONFLICT (device_id)
+        DO UPDATE SET last_seen = NOW()
+      `;
+
+      const saved = rows[0];
+
+      // Broadcast real-time event if emitter exists
+      if (global.__waterLevelEmitter) {
+        global.__waterLevelEmitter.emit("water-level:update", {
+          deviceId: saved.device_id,
+          sensorValid: saved.sensor_valid,
+          distanceCm: saved.distance_cm,
+          waterLevelCm: saved.water_level_cm,
+          waterLevelPercent: saved.water_level_percent,
+          recordedAt: saved.created_at,
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: "Water level telemetry received",
+        data: {
+          id: saved.id,
+          device_id: saved.device_id,
+          deviceId: saved.device_id,
+          sensor_valid: saved.sensor_valid,
+          sensorValid: saved.sensor_valid,
+          distance_cm: saved.distance_cm,
+          distanceCm: saved.distance_cm,
+          water_level_cm: saved.water_level_cm,
+          waterLevelCm: saved.water_level_cm,
+          water_level_percent: saved.water_level_percent,
+          waterLevelPercent: saved.water_level_percent,
+          created_at: saved.created_at,
+        },
+      });
+    } catch (error) {
+      console.error("POST water-level data failed:", error.message);
+      return res.status(500).json({ error: "Database operation failed" });
+    }
+  }
+
+  // Route 2: Existing ESP32 Agro Telemetry
+  if (deviceId !== "esp32-001") {
+    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001' or 'esp12f-water-001'" });
+  }
+
   const {
-    deviceId: inputDeviceId,
     temperature,
     humidity,
     temperature1,
@@ -116,16 +297,10 @@ module.exports = async function handler(req, res) {
     satellites,
   } = body;
 
-  const deviceId = inputDeviceId || "esp32-001";
-  if (deviceId !== "esp32-001") {
-    return res.status(400).json({ error: "Invalid deviceId. Expected 'esp32-001'" });
-  }
-
   const isValidFloat = (val) => val === undefined || val === null || (typeof val === "number" && Number.isFinite(val));
   const isValidInteger = (val) => val === undefined || val === null || (typeof val === "number" && Number.isInteger(val));
   const isValidAdc = (val) => val === undefined || val === null || (typeof val === "number" && Number.isInteger(val) && val >= 0 && val <= 4095);
 
-  // Validate environmental numbers (temperature and humidity are nullable/omittable if read fails)
   if (![temperature, humidity, temperature1, humidity1, temperature2, humidity2, altitude].every(isValidFloat)) {
     return res.status(400).json({ error: "Invalid numeric temperature/humidity/altitude data" });
   }
@@ -164,7 +339,6 @@ module.exports = async function handler(req, res) {
       latitude >= -90 && latitude <= 90 &&
       longitude >= -180 && longitude <= 180;
 
-    // Satellites strictly reflects current reading (null if omitted)
     const finalSats = (typeof satellites === "number" && Number.isInteger(satellites) && satellites >= 0)
       ? satellites
       : null;
@@ -174,7 +348,6 @@ module.exports = async function handler(req, res) {
     const finalAlt = hasLiveValidGps ? (altitude ?? null) : null;
     const finalGpsValid = hasLiveValidGps;
 
-    // Latest-only PostgreSQL UPSERT strategy
     const rows = await sql`
       INSERT INTO device_readings (
         device_id,
@@ -235,6 +408,13 @@ module.exports = async function handler(req, res) {
         gps_valid = EXCLUDED.gps_valid,
         created_at = NOW()
       RETURNING *
+    `;
+
+    await sql`
+      INSERT INTO device_status (device_id, last_seen)
+      VALUES (${deviceId}, NOW())
+      ON CONFLICT (device_id)
+      DO UPDATE SET last_seen = NOW()
     `;
 
     const saved = rows[0];

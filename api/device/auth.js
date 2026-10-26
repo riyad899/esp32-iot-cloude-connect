@@ -31,6 +31,7 @@ module.exports = async function handler(req, res) {
         SELECT 
           d.device_id,
           d.device_name,
+          d.device_type,
           d.is_connected,
           d.last_connected_at,
           s.last_seen,
@@ -59,6 +60,8 @@ module.exports = async function handler(req, res) {
         success: true,
         deviceId: row.device_id,
         name: row.device_name,
+        deviceType: row.device_type || (row.device_id === "esp12f-water-001" ? "water-level-monitor" : "agro-monitor"),
+        device_type: row.device_type || (row.device_id === "esp12f-water-001" ? "water-level-monitor" : "agro-monitor"),
         connected: Boolean(row.is_connected),
         status: isOnline ? "online" : "offline",
         lastConnectedAt: row.last_connected_at,

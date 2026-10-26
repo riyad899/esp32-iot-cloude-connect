@@ -9,8 +9,9 @@
     "dev": "node server.js",
     "vercel-build": "echo 'Vercel build complete'",
     "migrate": "node scripts/migrate.js",
-    "test": "node --check server.js && node tests/test_relay.js",
-    "test:relay": "node tests/test_relay.js"
+    "test": "node --check server.js && node tests/test_relay.js && node tests/test_water_level.js",
+    "test:relay": "node tests/test_relay.js",
+    "test:water": "node tests/test_water_level.js"
   },
   "keywords": [],
   "author": "",

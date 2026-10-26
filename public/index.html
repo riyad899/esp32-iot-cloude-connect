@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 IoT Cloud Connect — Water Level & Agro Dashboard</title>
+  <meta name="description" content="Real-time IoT dashboard for ESP-12F Water Level Monitoring and ESP32 Agricultural Controller." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-primary: #0a0e17;
+      --bg-surface: #111827;
+      --bg-surface-elevated: #1a2234;
+      --bg-glass: rgba(17, 24, 39, 0.75);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-glow: rgba(56, 189, 248, 0.25);
+      
+      --cyan-400: #38bdf8;
+      --cyan-500: #0ea5e9;
+      --blue-500: #3b82f6;
+      --emerald-400: #34d399;
+      --emerald-500: #10b981;
+      --amber-400: #fbbf24;
+      --amber-500: #f59e0b;
+      --rose-500: #f43f5e;
+      --purple-400: #c084fc;
+      
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-full: 9999px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(14, 165, 233, 0.15), transparent),
+        radial-gradient(ellipse 60% 40% at 90% 80%, rgba(99, 102, 241, 0.08), transparent);
+    }
+
+    header {
+      background: rgba(10, 14, 23, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 1rem 1.5rem;
+    }
+
+    .header-container {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo-badge {
+      width: 42px;
+      height: 42px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, var(--cyan-500), var(--blue-500));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
+    }
+
+    .logo-badge svg {
+      width: 24px;
+      height: 24px;
+      fill: #ffffff;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .realtime-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: var(--radius-full);
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--emerald-400);
+      box-shadow: 0 0 10px var(--emerald-400);
+      animation: pulse 2s infinite;
+    }
+
+    .pulse-dot.polling {
+      background-color: var(--cyan-400);
+      box-shadow: 0 0 10px var(--cyan-400);
+    }
+
+    .pulse-dot.offline {
+      background-color: var(--rose-500);
+      box-shadow: 0 0 10px var(--rose-500);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    .btn {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+      font-size: 0.85rem;
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface-elevated);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--cyan-500);
+    }
+
+    main {
+      max-width: 1280px;
+      width: 100%;
+      margin: 1.5rem auto;
+      padding: 0 1.25rem 3rem;
+      flex: 1;
+    }
+
+    /* Tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 1.75rem;
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      padding: 0.75rem 1.25rem;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      color: var(--cyan-400);
+      border-bottom-color: var(--cyan-400);
+    }
+
+    .tab-btn:hover:not(.active) {
+      color: var(--text-main);
+    }
+
+    /* Device Card Info Banner */
+    .device-banner {
+      background: linear-gradient(135deg, rgba(26, 34, 52, 0.7), rgba(17, 24, 39, 0.9));
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1.25rem;
+      margin-bottom: 1.75rem;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+
+    .device-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .device-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .device-tags {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.25rem 0.75rem;
+      border-radius: var(--radius-full);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .status-badge.online {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: var(--emerald-400);
+    }
+
+    .status-badge.offline {
+      background: rgba(244, 63, 94, 0.15);
+      border: 1px solid rgba(244, 63, 94, 0.4);
+      color: var(--rose-500);
+    }
+
+    .sensor-validity-badge.valid {
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: var(--cyan-400);
+    }
+
+    .sensor-validity-badge.invalid {
+      background: rgba(251, 191, 36, 0.15);
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      color: var(--amber-400);
+    }
+
+    .last-seen-box {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    .last-seen-box strong {
+      color: var(--text-main);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Grid Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 1.75rem;
+    }
+
+    @media (max-width: 960px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      .last-seen-box {
+        text-align: left;
+      }
+    }
+
+    /* Tank Card */
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tank-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
+    /* SVG Cylinder Tank Visualization */
+    .tank-stage {
+      position: relative;
+      width: 220px;
+      height: 320px;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(14, 165, 233, 0.05) 100%);
+      box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.6), 0 8px 32px rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    /* Sensor at the top */
+    .sensor-head {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 60px;
+      height: 20px;
+      background: #334155;
+      border-radius: 6px;
+      border: 1px solid #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      padding: 0 4px;
+      z-index: 5;
+    }
+
+    .transducer {
+      width: 14px;
+      height: 10px;
+      border-radius: 3px;
+      background: #94a3b8;
+    }
+
+    .beam-waves {
+      position: absolute;
+      top: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80px;
+      pointer-events: none;
+      opacity: 0.6;
+      animation: sonarPulse 2s infinite ease-in-out;
+    }
+
+    @keyframes sonarPulse {
+      0% { opacity: 0.2; transform: translateX(-50%) scale(0.9); }
+      50% { opacity: 0.8; transform: translateX(-50%) scale(1.05); }
+      100% { opacity: 0.2; transform: translateX(-50%) scale(0.9); }
+    }
+
+    /* Tank Rulers / Markers */
+    .tank-markers {
+      position: absolute;
+      left: 8px;
+      top: 35px;
+      bottom: 15px;
+      width: 35px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      pointer-events: none;
+      z-index: 6;
+      border-right: 1px dashed rgba(255, 255, 255, 0.15);
+      padding-right: 4px;
+    }
+
+    /* Animated Liquid Fill */
+    .tank-liquid {
+      width: 100%;
+      height: 74.6%;
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.8) 0%, rgba(14, 165, 233, 0.95) 100%);
+      position: relative;
+      transition: height 1s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 -4px 18px rgba(56, 189, 248, 0.5);
+    }
+
+    /* Wave effect at surface */
+    .wave {
+      position: absolute;
+      top: -12px;
+      left: 0;
+      width: 200%;
+      height: 24px;
+      background: url('data:image/svg+xml;utf8,<svg viewBox="0 0 1200 120" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 C150,90 350,-40 500,50 C650,140 900,-20 1200,40 L1200,120 L0,120 Z" fill="rgba(56,189,248,0.7)"></path></svg>');
+      background-size: 50% 100%;
+      animation: waveFlow 4s linear infinite;
+    }
+
+    @keyframes waveFlow {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* Threshold colors */
+    .tank-liquid.threshold-very-low {
+      background: linear-gradient(180deg, #f43f5e, #be123c);
+      box-shadow: 0 -4px 18px rgba(244, 63, 94, 0.5);
+    }
+    .tank-liquid.threshold-low {
+      background: linear-gradient(180deg, #fbbf24, #d97706);
+      box-shadow: 0 -4px 18px rgba(251, 191, 36, 0.5);
+    }
+    .tank-liquid.threshold-normal {
+      background: linear-gradient(180deg, #38bdf8, #0284c7);
+      box-shadow: 0 -4px 18px rgba(56, 189, 248, 0.5);
+    }
+    .tank-liquid.threshold-high {
+      background: linear-gradient(180deg, #60a5fa, #2563eb);
+      box-shadow: 0 -4px 18px rgba(96, 165, 250, 0.5);
+    }
+    .tank-liquid.threshold-critical {
+      background: linear-gradient(180deg, #c084fc, #7e22ce);
+      box-shadow: 0 -4px 18px rgba(192, 132, 252, 0.6);
+    }
+
+    .tank-center-badge {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2.2rem;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+      color: #ffffff;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+      z-index: 7;
+      pointer-events: none;
+    }
+
+    /* Threshold legend */
+    .threshold-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+
+    .threshold-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.6rem;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .threshold-item.current {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.4);
+      font-weight: 700;
+    }
+
+    .threshold-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+      display: inline-block;
+    }
+
+    /* Metric Cards Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.75rem;
+    }
+
+    .metric-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .metric-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+
+    .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .metric-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .metric-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.04);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .metric-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.85rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: baseline;
+      gap: 0.3rem;
+    }
+
+    .metric-unit {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .metric-footer {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 0.5rem;
+    }
+
+    /* History Table */
+    .history-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .table-container {
+      overflow-x: auto;
+      margin-top: 1rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+      text-align: left;
+    }
+
+    th {
+      padding: 0.75rem 1rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius-full);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--cyan-400);
+      border-radius: var(--radius-full);
+      transition: width 0.3s;
+    }
+
+    /* Alert / Error Box */
+    .alert-banner {
+      background: rgba(244, 63, 94, 0.12);
+      border: 1px solid rgba(244, 63, 94, 0.35);
+      border-radius: var(--radius-md);
+      padding: 0.9rem 1.25rem;
+      color: #fecdd3;
+      font-size: 0.85rem;
+      margin-bottom: 1.5rem;
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .alert-banner.show {
+      display: flex;
+    }
+
+    /* Relay Controls in ESP32 Tab */
+    .relay-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .relay-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 32px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #334155;
+      transition: .4s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 24px;
+      width: 24px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--emerald-500);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(28px);
+    }
+
+    footer {
+      border-top: 1px solid var(--border-color);
+      padding: 1.5rem;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-container">
+      <div class="logo-group">
+        <div class="logo-badge">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+          </svg>
+        </div>
+        <div>
+          <h1>ESP32 IoT Cloud Connect</h1>
+          <div class="subtitle">Multi-Sensor Telemetry & Water Level Monitoring Platform</div>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="realtime-pill" id="realtimeStatusPill">
+          <span class="pulse-dot" id="realtimePulse"></span>
+          <span id="realtimeText">Connecting...</span>
+        </div>
+        <button class="btn" id="manualRefreshBtn" title="Fetch latest readings">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Navigation Tabs -->
+    <div class="tabs-nav">
+      <button class="tab-btn active" id="tabWaterBtn" onclick="switchTab('water')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+        </svg>
+        ESP-12F Water Level Monitor
+      </button>
+      <button class="tab-btn" id="tabAgroBtn" onclick="switchTab('agro')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+        ESP32 Agro Master
+      </button>
+    </div>
+
+    <!-- Alert Banner (shown when sensor invalid or stale) -->
+    <div class="alert-banner" id="sensorAlertBanner">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span id="sensorAlertMessage">Warning: Sensor reading is invalid or device is offline.</span>
+    </div>
+
+    <!-- TAB 1: Water Level Monitor View -->
+    <section id="waterView">
+      <div class="device-banner">
+        <div class="device-meta">
+          <div>
+            <div class="device-title" id="waterDeviceName">ESP-12F Water Level Monitor</div>
+            <div class="device-tags">
+              <span class="tag" id="waterDeviceId">esp12f-water-001</span>
+              <span class="tag">Type: water-level-monitor</span>
+              <span class="tag">Firmware Interval: ~5s</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+          <div class="status-badge online" id="waterStatusBadge">ONLINE</div>
+          <div class="status-badge sensor-validity-badge valid" id="waterSensorBadge">SENSOR HEALTHY</div>
+          <div class="last-seen-box">
+            <div>Last Updated: <strong id="waterLastUpdate">--</strong></div>
+            <div id="waterRelativeTime" style="font-size:0.75rem; color:var(--text-dim)">Just now</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <!-- Visual Tank Cylinder -->
+        <div class="card">
+          <div class="card-title">
+            <span>Water Tank Level</span>
+            <span id="tankThresholdLabel" style="font-size: 0.75rem; color: var(--cyan-400);">Normal (40-79%)</span>
+          </div>
+
+          <div class="tank-container">
+            <div class="tank-stage">
+              <!-- Ultrasonic Sensor Header -->
+              <div class="sensor-head" title="Ultrasonic Sensor (HC-SR04 / JSN-SR04T)">
+                <div class="transducer"></div>
+                <div class="transducer"></div>
+              </div>
+
+              <div class="beam-waves">
+                <svg viewBox="0 0 100 60" fill="none" stroke="rgba(56, 189, 248, 0.7)" stroke-width="2">
+                  <path d="M30 10 A25 25 0 0 0 70 10"></path>
+                  <path d="M20 25 A40 40 0 0 0 80 25"></path>
+                  <path d="M10 40 A55 55 0 0 0 90 40"></path>
+                </svg>
+              </div>
+
+              <!-- Markers -->
+              <div class="tank-markers">
+                <span>100%</span>
+                <span>80%</span>
+                <span>60%</span>
+                <span>40%</span>
+                <span>20%</span>
+                <span>0%</span>
+              </div>
+
+              <!-- Animated Liquid Fill -->
+              <div class="tank-liquid threshold-normal" id="tankLiquidFill" style="height: 74.6%;">
+                <div class="wave"></div>
+              </div>
+
+              <!-- Digital Readout Center -->
+              <div class="tank-center-badge" id="tankCenterValue">74.6%</div>
+            </div>
+
+            <!-- Thresholds Reference Legend -->
+            <div class="threshold-legend">
+              <div class="threshold-item" id="legend-very-low">
+                <span><span class="threshold-dot" style="background:#f43f5e;"></span>0% – 19%</span>
+                <span>Very Low</span>
+              </div>
+              <div class="threshold-item" id="legend-low">
+                <span><span class="threshold-dot" style="background:#fbbf24;"></span>20% – 39%</span>
+                <span>Low</span>
+              </div>
+              <div class="threshold-item current" id="legend-normal">
+                <span><span class="threshold-dot" style="background:#38bdf8;"></span>40% – 79%</span>
+                <span>Normal</span>
+              </div>
+              <div class="threshold-item" id="legend-high">
+                <span><span class="threshold-dot" style="background:#60a5fa;"></span>80% – 94%</span>
+                <span>High</span>
+              </div>
+              <div class="threshold-item" id="legend-critical">
+                <span><span class="threshold-dot" style="background:#c084fc;"></span>95% – 100%</span>
+                <span>Critical / Full</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics & History -->
+        <div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">Water Level (%)</span>
+                <div class="metric-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan-400)" stroke-width="2">
+                    <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+                  </svg>
+                </div>
+              </div>
+              <div class="metric-value">
+                <span id="metricPercent">74.6</span>
+                <span class="metric-unit">%</span>
+              </div>
+              <div class="progress-bar-container">
+                <div class="progress-bar" id="metricPercentBar" style="width: 74.6%;"></div>
+              </div>
+              <div class="metric-footer" id="metricPercentStatus">Tank status: Normal</div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">Water Height</span>
+                <div class="metric-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-400)" stroke-width="2">
+                    <path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="metric-value">
+                <span id="metricHeight">74.6</span>
+                <span class="metric-unit">cm</span>
+              </div>
+              <div class="metric-footer">Height from tank bottom</div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">Sensor Distance</span>
+                <div class="metric-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--purple-400)" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="metric-value">
+                <span id="metricDistance">25.4</span>
+                <span class="metric-unit">cm</span>
+              </div>
+              <div class="metric-footer">Distance to water surface</div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-header">
+                <span class="metric-label">Sensor Validity</span>
+                <div class="metric-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-400)" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                  </svg>
+                </div>
+              </div>
+              <div class="metric-value" style="font-size:1.35rem;" id="metricValidity">
+                HEALTHY
+              </div>
+              <div class="metric-footer">Echo signal verified</div>
+            </div>
+          </div>
+
+          <!-- Recent History Table -->
+          <div class="history-card">
+            <div class="card-title">
+              <span>Recent Water-Level History</span>
+              <span style="font-size: 0.75rem; color: var(--text-dim);">Live Database Logs (Last 20)</span>
+            </div>
+
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Water Level</th>
+                    <th>Height (cm)</th>
+                    <th>Distance (cm)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">
+                      Loading historical readings from Neon DB...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: ESP32 Agro Master View -->
+    <section id="agroView" style="display: none;">
+      <div class="device-banner">
+        <div class="device-meta">
+          <div>
+            <div class="device-title">ESP32 Master Controller</div>
+            <div class="device-tags">
+              <span class="tag">esp32-001</span>
+              <span class="tag">Type: agro-monitor</span>
+              <span class="tag">Dual DHT11 + Dual Soil + Rain ADC + GPS</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+          <div class="status-badge online" id="agroStatusBadge">ONLINE</div>
+          <div class="last-seen-box">
+            <div>Last Updated: <strong id="agroLastUpdate">--</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Ambient Temperature</span>
+          </div>
+          <div class="metric-value"><span id="agroTemp">--</span> <span class="metric-unit">°C</span></div>
+          <div class="metric-footer">Dual DHT11 sensor</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Relative Humidity</span>
+          </div>
+          <div class="metric-value"><span id="agroHum">--</span> <span class="metric-unit">%</span></div>
+          <div class="metric-footer">Atmospheric moisture</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Soil Moisture (ADC)</span>
+          </div>
+          <div class="metric-value"><span id="agroSoil">--</span> <span class="metric-unit">raw</span></div>
+          <div class="metric-footer">Capacitive sensor (0 - 4095)</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">Rain Sensor (ADC)</span>
+          </div>
+          <div class="metric-value"><span id="agroRain">--</span> <span class="metric-unit">raw</span></div>
+          <div class="metric-footer">Surface plate reading</div>
+        </div>
+      </div>
+
+      <!-- 2-Channel Relay Controls -->
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-title">2-Channel Relay Control (Water Pump & Valve)</div>
+        <div class="relay-grid">
+          <div class="relay-card">
+            <div>
+              <h3 style="font-size: 1.1rem; margin-bottom: 0.25rem;">Relay 1: Water Pump</h3>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Main submersible pump command</p>
+              <div style="margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;" id="relay1StatusText">State: OFF</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="relay1Toggle" onchange="toggleRelay('relay1', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="relay-card">
+            <div>
+              <h3 style="font-size: 1.1rem; margin-bottom: 0.25rem;">Relay 2: Solenoid Valve</h3>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Auxiliary intake / bypass valve</p>
+              <div style="margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;" id="relay2StatusText">State: OFF</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="relay2Toggle" onchange="toggleRelay('relay2', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    ESP32 IoT Cloud Connect &bull; NASA Space Apps Project &bull; Neon PostgreSQL Backend on Vercel
+  </footer>
+
+  <script>
+    // State
+    const WATER_DEVICE_ID = "esp12f-water-001";
+    const AGRO_DEVICE_ID = "esp32-001";
+    let activeTab = "water";
+    let eventSource = null;
+    let pollInterval = null;
+    let lastRecordedTimestamp = null;
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.getElementById("tabWaterBtn").classList.toggle("active", tab === "water");
+      document.getElementById("tabAgroBtn").classList.toggle("active", tab === "agro");
+      document.getElementById("waterView").style.display = tab === "water" ? "block" : "none";
+      document.getElementById("agroView").style.display = tab === "agro" ? "block" : "none";
+
+      if (tab === "water") {
+        fetchWaterData();
+        fetchWaterHistory();
+      } else {
+        fetchAgroData();
+        fetchRelayState();
+      }
+    }
+
+    // Determine Threshold Category
+    function getThresholdCategory(percent) {
+      if (percent < 20) return { key: "very-low", label: "Very Low (0-19%)", color: "#f43f5e", className: "threshold-very-low" };
+      if (percent < 40) return { key: "low", label: "Low (20-39%)", color: "#fbbf24", className: "threshold-low" };
+      if (percent < 80) return { key: "normal", label: "Normal (40-79%)", color: "#38bdf8", className: "threshold-normal" };
+      if (percent < 95) return { key: "high", label: "High (80-94%)", color: "#60a5fa", className: "threshold-high" };
+      return { key: "critical", label: "Critical / Near Full (95-100%)", color: "#c084fc", className: "threshold-critical" };
+    }
+
+    // Update Water Level UI
+    function updateWaterUI(data) {
+      if (!data) return;
+
+      const percent = data.waterLevelPercent != null ? Number(data.waterLevelPercent) : null;
+      const height = data.waterLevelCm != null ? Number(data.waterLevelCm) : null;
+      const distance = data.distanceCm != null ? Number(data.distanceCm) : null;
+      const isValid = data.sensorValid !== false && data.sensor_valid !== false;
+      const timestamp = data.created_at || data.recordedAt || data.createdAt;
+
+      lastRecordedTimestamp = timestamp ? new Date(timestamp) : new Date();
+
+      // Sensor Validity Badge
+      const sensorBadge = document.getElementById("waterSensorBadge");
+      const metricValidity = document.getElementById("metricValidity");
+      const alertBanner = document.getElementById("sensorAlertBanner");
+      const alertMessage = document.getElementById("sensorAlertMessage");
+
+      if (isValid) {
+        sensorBadge.textContent = "SENSOR HEALTHY";
+        sensorBadge.className = "status-badge sensor-validity-badge valid";
+        metricValidity.textContent = "HEALTHY";
+        metricValidity.style.color = "var(--emerald-400)";
+        alertBanner.classList.remove("show");
+      } else {
+        sensorBadge.textContent = "SENSOR FAULT";
+        sensorBadge.className = "status-badge sensor-validity-badge invalid";
+        metricValidity.textContent = "INVALID";
+        metricValidity.style.color = "var(--amber-400)";
+        alertBanner.classList.add("show");
+        alertMessage.textContent = "Warning: Sensor echo returned invalid measurement. Showing last safe record.";
+      }
+
+      // Check for stale reading (older than 2 minutes)
+      const now = new Date();
+      const ageSeconds = Math.floor((now - lastRecordedTimestamp) / 1000);
+      if (ageSeconds > 120) {
+        alertBanner.classList.add("show");
+        alertMessage.textContent = `Telemetry is stale (${Math.floor(ageSeconds / 60)} minutes old). Waiting for ESP-12F heartbeat...`;
+      }
+
+      // Percentages & Heights
+      if (percent != null && Number.isFinite(percent)) {
+        const clampedPercent = Math.max(0, Math.min(100, percent));
+        document.getElementById("tankCenterValue").textContent = `${clampedPercent.toFixed(1)}%`;
+        document.getElementById("metricPercent").textContent = clampedPercent.toFixed(1);
+        document.getElementById("metricPercentBar").style.width = `${clampedPercent}%`;
+
+        // Liquid height & threshold color
+        const liquid = document.getElementById("tankLiquidFill");
+        liquid.style.height = `${clampedPercent}%`;
+
+        const threshold = getThresholdCategory(clampedPercent);
+        liquid.className = `tank-liquid ${threshold.className}`;
+        document.getElementById("tankThresholdLabel").textContent = threshold.label;
+        document.getElementById("tankThresholdLabel").style.color = threshold.color;
+        document.getElementById("metricPercentStatus").textContent = `Tank status: ${threshold.label}`;
+
+        // Highlight Legend item
+        ["very-low", "low", "normal", "high", "critical"].forEach(k => {
+          const el = document.getElementById(`legend-${k}`);
+          if (el) el.classList.toggle("current", k === threshold.key);
+        });
+      } else {
+        document.getElementById("tankCenterValue").textContent = "--";
+        document.getElementById("metricPercent").textContent = "--";
+      }
+
+      if (height != null && Number.isFinite(height)) {
+        document.getElementById("metricHeight").textContent = height.toFixed(1);
+      } else {
+        document.getElementById("metricHeight").textContent = "--";
+      }
+
+      if (distance != null && Number.isFinite(distance)) {
+        document.getElementById("metricDistance").textContent = distance.toFixed(1);
+      } else {
+        document.getElementById("metricDistance").textContent = "--";
+      }
+
+      if (timestamp) {
+        const d = new Date(timestamp);
+        document.getElementById("waterLastUpdate").textContent = d.toLocaleTimeString();
+        document.getElementById("waterRelativeTime").textContent = `${Math.max(0, ageSeconds)}s ago`;
+      }
+    }
+
+    // Fetch Latest Water Data
+    async function fetchWaterData() {
+      try {
+        const res = await fetch(`/api/device/data/latest?deviceId=${WATER_DEVICE_ID}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (json.success && json.data) {
+          updateWaterUI(json.data);
+        }
+
+        // Also fetch status
+        const statusRes = await fetch(`/api/device/status?deviceId=${WATER_DEVICE_ID}`);
+        if (statusRes.ok) {
+          const sJson = await statusRes.json();
+          const badge = document.getElementById("waterStatusBadge");
+          if (sJson.status === "online") {
+            badge.textContent = "ONLINE";
+            badge.className = "status-badge online";
+          } else {
+            badge.textContent = "OFFLINE";
+            badge.className = "status-badge offline";
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch water data:", err.message);
+      }
+    }
+
+    // Fetch Water History
+    async function fetchWaterHistory() {
+      try {
+        const res = await fetch(`/api/device/water-level/history?deviceId=${WATER_DEVICE_ID}&limit=15`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          renderHistoryTable(json.data);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch history:", err.message);
+      }
+    }
+
+    function renderHistoryTable(list) {
+      const tbody = document.getElementById("historyTableBody");
+      if (!list || list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">No historical records found for ${WATER_DEVICE_ID} yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = list.map(item => {
+        const d = new Date(item.createdAt || item.created_at);
+        const timeStr = d.toLocaleTimeString() + " " + d.toLocaleDateString();
+        const p = item.waterLevelPercent != null ? `${Number(item.waterLevelPercent).toFixed(1)}%` : '--';
+        const h = item.waterLevelCm != null ? `${Number(item.waterLevelCm).toFixed(1)} cm` : '--';
+        const dist = item.distanceCm != null ? `${Number(item.distanceCm).toFixed(1)} cm` : '--';
+        const valid = item.sensorValid !== false;
+
+        return `
+          <tr>
+            <td style="color: var(--text-muted); font-size: 0.78rem;">${timeStr}</td>
+            <td style="font-weight: 700; color: var(--cyan-400);">${p}</td>
+            <td>${h}</td>
+            <td>${dist}</td>
+            <td>
+              <span class="status-badge ${valid ? 'online' : 'offline'}" style="font-size:0.65rem; padding: 0.15rem 0.5rem;">
+                ${valid ? 'VALID' : 'INVALID'}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    // Fetch Agro Data
+    async function fetchAgroData() {
+      try {
+        const res = await fetch(`/api/device/data/latest?deviceId=${AGRO_DEVICE_ID}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.success && json.data) {
+          const d = json.data;
+          document.getElementById("agroTemp").textContent = d.temperature != null ? d.temperature : "--";
+          document.getElementById("agroHum").textContent = d.humidity != null ? d.humidity : "--";
+          document.getElementById("agroSoil").textContent = d.soil_moisture_raw != null ? d.soil_moisture_raw : (d.soil1 ?? "--");
+          document.getElementById("agroRain").textContent = d.rain_sensor_raw != null ? d.rain_sensor_raw : (d.rain ?? "--");
+          if (d.created_at) {
+            document.getElementById("agroLastUpdate").textContent = new Date(d.created_at).toLocaleTimeString();
+          }
+        }
+      } catch (err) {
+        console.warn("Agro fetch failed:", err);
+      }
+    }
+
+    // Relay Controls
+    async function fetchRelayState() {
+      try {
+        const res = await fetch(`/api/device/relay?deviceId=${AGRO_DEVICE_ID}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.success) {
+          const r1 = json.relay1 === "ON";
+          const r2 = json.relay2 === "ON";
+          document.getElementById("relay1Toggle").checked = r1;
+          document.getElementById("relay2Toggle").checked = r2;
+          document.getElementById("relay1StatusText").textContent = `State: ${json.relay1}`;
+          document.getElementById("relay2StatusText").textContent = `State: ${json.relay2}`;
+        }
+      } catch (err) {
+        console.warn("Relay fetch failed:", err);
+      }
+    }
+
+    async function toggleRelay(relayKey, state) {
+      const stateStr = state ? "ON" : "OFF";
+      try {
+        const res = await fetch("/api/device/relay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            deviceId: AGRO_DEVICE_ID,
+            [relayKey]: stateStr,
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          document.getElementById(`${relayKey}StatusText`).textContent = `State: ${stateStr}`;
+        }
+      } catch (err) {
+        alert("Failed to update relay state: " + err.message);
+      }
+    }
+
+    // Real-Time Architecture Setup (SSE Stream with Fast Polling Fallback)
+    function setupRealTime() {
+      const pill = document.getElementById("realtimeStatusPill");
+      const dot = document.getElementById("realtimePulse");
+      const text = document.getElementById("realtimeText");
+
+      // Attempt SSE Stream connection
+      try {
+        if (window.EventSource) {
+          eventSource = new EventSource("/api/device/water-level/stream");
+
+          eventSource.onopen = () => {
+            dot.className = "pulse-dot";
+            text.textContent = "Live SSE Stream";
+          };
+
+          eventSource.addEventListener("water-level:update", (e) => {
+            try {
+              const data = JSON.parse(e.data);
+              if (data.deviceId === WATER_DEVICE_ID) {
+                updateWaterUI(data);
+                // Also refresh history
+                fetchWaterHistory();
+              }
+            } catch (parseErr) {
+              console.warn("SSE parse error:", parseErr);
+            }
+          });
+
+          eventSource.onerror = () => {
+            // If SSE fails or disconnects (e.g., Vercel Serverless environment), fall back to fast polling
+            dot.className = "pulse-dot polling";
+            text.textContent = "Fast Polling (Vercel Serverless, 3s)";
+            if (eventSource) {
+              eventSource.close();
+              eventSource = null;
+            }
+            startPollingFallback();
+          };
+        } else {
+          startPollingFallback();
+        }
+      } catch (err) {
+        startPollingFallback();
+      }
+    }
+
+    function startPollingFallback() {
+      const dot = document.getElementById("realtimePulse");
+      const text = document.getElementById("realtimeText");
+      dot.className = "pulse-dot polling";
+      text.textContent = "Fast Polling (Vercel Serverless, 3s)";
+
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(() => {
+        if (activeTab === "water") {
+          fetchWaterData();
+          fetchWaterHistory();
+        } else {
+          fetchAgroData();
+        }
+      }, 3000);
+    }
+
+    // Periodic relative time update
+    setInterval(() => {
+      if (lastRecordedTimestamp) {
+        const sec = Math.floor((new Date() - lastRecordedTimestamp) / 1000);
+        document.getElementById("waterRelativeTime").textContent = `${Math.max(0, sec)}s ago`;
+      }
+    }, 1000);
+
+    // Initial Load
+    document.getElementById("manualRefreshBtn").addEventListener("click", () => {
+      if (activeTab === "water") {
+        fetchWaterData();
+        fetchWaterHistory();
+      } else {
+        fetchAgroData();
+        fetchRelayState();
+      }
+    });
+
+    fetchWaterData();
+    fetchWaterHistory();
+    setupRealTime();
+  </script>
+</body>
+</html>

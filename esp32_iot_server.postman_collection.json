@@ -247,6 +247,108 @@
           }
         }
       ]
+    },
+    {
+      "name": "4. ESP-12F Water Level Monitoring",
+      "item": [
+        {
+          "name": "POST Water Level Telemetry (esp12f-water-001)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"esp12f-water-001\",\n  \"sensorValid\": true,\n  \"distanceCm\": 25.4,\n  \"waterLevelCm\": 74.6,\n  \"waterLevelPercent\": 74.6\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/device/data",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "data"]
+            }
+          }
+        },
+        {
+          "name": "GET Latest Water Level Reading",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/data/latest?deviceId=esp12f-water-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "data", "latest"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "esp12f-water-001"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET Water Level History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/water-level/history?deviceId=esp12f-water-001&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "water-level", "history"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "esp12f-water-001"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET ESP-12F Device Status (Online/Offline)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/status?deviceId=esp12f-water-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "status"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "esp12f-water-001"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET ESP-12F Device Auth & Registration Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/device/auth?deviceId=esp12f-water-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "device", "auth"],
+              "query": [
+                {
+                  "key": "deviceId",
+                  "value": "esp12f-water-001"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }
